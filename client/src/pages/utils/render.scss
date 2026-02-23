@@ -1,0 +1,59 @@
+@page {
+  size: A4 portrait;
+  margin: 20px;
+}
+
+.header-1 {
+  text-align: center;
+  margin-bottom: 25px;
+  border-bottom: 2px solid black;
+}
+
+.header-2 {
+  padding: 0;
+  text-align: left;
+  margin-bottom: 20px;
+  border-bottom: 2px solid black;
+}
+
+.header-3 .underline {
+  text-align: right;
+}
+
+.table-pdf {
+  width: 100%;
+  margin-bottom: 1rem;
+  border: 1px solid black;
+  text-align: center;
+}
+
+.table-pdf,
+.th-pdf,
+.td-pdf {
+  border: 1px solid black;
+  border-collapse: collapse;
+}
+
+.tr-form-1 {
+  height: 50px;
+}
+
+.tr-form-1 .td-pdf {
+  padding: 5px;
+}
+
+.tr-form-1 .detail {
+  height: 150px;
+}
+
+.row-2 {
+  height: 100px;
+}
+
+.ttd-name {
+  padding-top: 30px;
+}
+
+.hr-pdf {
+  border: 1px solid black;
+}

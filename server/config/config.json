@@ -1,0 +1,23 @@
+{
+  "development": {
+    "username": "root",
+    "password": null,
+    "database": "ticketing",
+    "host": "127.0.0.1",
+    "dialect": "mariadb"
+  },
+  "test": {
+    "username": "root",
+    "password": null,
+    "database": "database_test",
+    "host": "127.0.0.1",
+    "dialect": "mysql"
+  },
+  "production": {
+    "username": "sql6482875",
+    "password": "8xlp59gwYw",
+    "database": "sql6482875",
+    "host": "sql6.freesqldatabase.com",
+    "dialect": "mariadb"
+  }
+}

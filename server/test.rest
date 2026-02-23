@@ -1,0 +1,66 @@
+# POST http://localhost:4000/api/login
+# Content-Type: application/json
+
+# {
+#   "id_karyawan": "00004",
+#   "password": "00004_2022531"
+# }
+
+# POST http://localhost:4000/api/requests
+# Content-Type: : application/json
+
+# {
+#   "userRequest": "user",
+#   "department": "Finance",
+#   "email": "user@gmail.com",
+#   "priority": "high",
+#   "titleRequest": "Request Title",
+#   "subjectRequest": "Request Subject",
+# }
+
+# POST http://localhost:4000/api/login
+# Content-Type: application/json
+
+# {
+#   "username": "alwan",
+#   "email": "alwan@gmail.com"
+# }
+
+# GET http://localhost:4000/api/users
+# Content-Type: application/json
+# Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTYsInVzZXJuYW1lIjoiYWRtaW4iLCJlbWFpbCI6ImFkbWluQGdtYWlsLmNvbSIsImxldmVsIjoiYWRtaW4iLCJpYXQiOjE2NDY0NzU4ODQsImV4cCI6MTY0NjU2MjI4NH0.HUl8nn3MbqLQL3-c83NiP3T7fRhTQ2Kazq0tQ_XfOCk
+
+# POST http://localhost:4000/api/categories
+# Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTYsInVzZXJuYW1lIjoiYWRtaW4iLCJlbWFpbCI6ImFkbWluQGdtYWlsLmNvbSIsImxldmVsIjoiYWRtaW4iLCJpYXQiOjE2NDY0NzU4ODQsImV4cCI6MTY0NjU2MjI4NH0.HUl8nn3MbqLQL3-c83NiP3T7fRhTQ2Kazq0tQ_XfOCk
+# Content-Type: application/json
+
+# {
+#     "category": "category",
+# }
+
+# GET http://localhost:4000/api/requests-reply/2
+
+# POST http://localhost:4000/api/reply-req/2
+# Content-Type: application/json
+
+# {
+#     "message_reply": "reply"
+# }
+
+# GET http://localhost:4000/api/request/search
+# Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NSwidXNlcm5hbWUiOiJhbHdhbiIsImVtYWlsIjoiYWx3YW5AZ21haWwuY29tIiwibGV2ZWwiOiJ1c2VyIiwiaWF0IjoxNjUxNTgyMjAzLCJleHAiOjE2NTE2Njg2MDN9.a-5AqAgfNeJbK75oipIgKUcHjU5kEaeUVLj9yFZV4qI
+
+# GET http://localhost:4000/api/request/search?search=team
+# Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NSwidXNlcm5hbWUiOiJhbHdhbiIsImVtYWlsIjoiYWx3YW5AZ21haWwuY29tIiwibGV2ZWwiOiJ1c2VyIiwiaWF0IjoxNjUxNjI2MTA5LCJleHAiOjE2NTE3MTI1MDl9.JJYMDtFwKwfXJd1qNKqsjZmPtiGAx-zL0PdUdte0GLU
+
+# token user : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NSwidXNlcm5hbWUiOiJhbHdhbiIsImVtYWlsIjoiYWx3YW5AZ21haWwuY29tIiwibGV2ZWwiOiJ1c2VyIiwiaWF0IjoxNjUxNjI2MTA5LCJleHAiOjE2NTE3MTI1MDl9.JJYMDtFwKwfXJd1qNKqsjZmPtiGAx-zL0PdUdte0GLU
+
+# token admin : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwidXNlcm5hbWUiOiJhZG1pbiIsImZ1bGxuYW1lIjoiYWRtaW5pc3RyYXRvciIsImVtYWlsIjoiYWRtaW5AZ21haWwuY29tIiwibGV2ZWwiOiJhZG1pbiIsImlhdCI6MTY1MTU4NDM4OSwiZXhwIjoxNjUxNjcwNzg5fQ.OtbdtvPSF7BMwr7kwEg4_wW1EZOOUhdya1O3Ro5TZ4Y
+
+POST http://localhost:4000/api/request/filter-date
+Content-Type: application/json
+
+{
+    "startDate": "2022-04-23",
+    "endDate": "2020-04-27"
+}
