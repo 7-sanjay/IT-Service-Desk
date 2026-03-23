@@ -118,11 +118,9 @@ export default () => {
       statusText = "Rejected";
     }
 
-    const priority = request.priority || "Medium";
+    const priority = request.priority === "Critical" ? "High" : (request.priority || "Medium");
     let priorityVariant = "secondary";
-    if (priority === "Critical") {
-      priorityVariant = "danger";
-    } else if (priority === "High") {
+    if (priority === "High") {
       priorityVariant = "warning";
     } else if (priority === "Medium") {
       priorityVariant = "info";

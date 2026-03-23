@@ -3,9 +3,13 @@ const { getDb } = require("../../config/mongo");
 const { ObjectId } = require("mongodb");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
+const isSupportEngineer = (level) =>
+  level === "support_engineer" || level === "team";
+const isManager = (level) => level === "manager" || level === "head";
+
 // Department filter for team/head: only tickets from their assigned department. Ticket "Human Resources (HR)" matches user department "HR".
 const getDepartmentFilter = (decoded) => {
-  if (decoded.level !== "team" && decoded.level !== "head") return {};
+  if (!isSupportEngineer(decoded.level) && !isManager(decoded.level)) return {};
   const d = decoded.department;
   if (!d) return {};
   if (d === "HR") {
@@ -15,12 +19,20 @@ const getDepartmentFilter = (decoded) => {
 };
 
 const requestInUserDepartment = (request, decoded) => {
-  if (decoded.level !== "team" && decoded.level !== "head") return true;
+  if (!isSupportEngineer(decoded.level) && !isManager(decoded.level)) return true;
   const d = decoded.department;
   if (!d) return true;
   const reqDept = request.department;
   if (d === "HR") return reqDept === "HR" || reqDept === "Human Resources (HR)";
   return reqDept === d;
+};
+
+const canAccessRequestConversation = (request, decoded) => {
+  if (decoded.level === "admin") return true;
+  if (decoded.level === "user") {
+    return String(request.id_user) === String(decoded.id);
+  }
+  return requestInUserDepartment(request, decoded);
 };
 
 // pagination function
@@ -37,13 +49,32 @@ const getPagingData = (data, page, limit) => {
   return { totalItems, requests, totalPages, currentPage };
 };
 
-// Determine ticket priority (Low/Medium/High/Critical) based on request details
+const normalizePriority = (priority, fallback = "Medium") => {
+  if (priority === null || priority === undefined) return fallback;
+  const raw = String(priority).trim().toLowerCase();
+
+  if (raw === "low") return "Low";
+  if (raw === "medium") return "Medium";
+  if (raw === "high") return "High";
+
+  // Legacy compatibility: old "Critical" tickets now map to "High"
+  if (raw === "critical") return "High";
+
+  return fallback;
+};
+
+const normalizeRequestPriority = (request) => ({
+  ...request,
+  priority: normalizePriority(request.priority),
+});
+
+// Determine ticket priority (Low/Medium/High)
 const determinePriority = (category = "", title = "", subject = "") => {
   const text = `${category} ${title} ${subject}`.toLowerCase();
 
   const hasAny = (terms) => terms.some((t) => text.includes(t));
 
-  // Critical: major outage, security, data loss, production down
+  // High: major outage, security, data loss, production down
   if (
     hasAny([
       "system down",
@@ -70,7 +101,7 @@ const determinePriority = (category = "", title = "", subject = "") => {
       "unauthorized access",
     ])
   ) {
-    return "Critical";
+    return "High";
   }
 
   // High: blocking work for multiple users or explicitly urgent
@@ -182,7 +213,8 @@ const createRequest = async (req, res) => {
       email_request: req.decoded.email,
       department,
       ticket_status: "W",
-      priority, // Low / Medium / High / Critical
+      priority: normalizePriority(priority), // Low / Medium / High
+      priority_locked_at: now,
       start_process_ticket: now, // Timer starts when ticket is created
       end_date_ticket: null,
       accumulated_time_ms: 0, // Track accumulated time when ticket is paused/resumed
@@ -266,10 +298,11 @@ const getRequests = async (req, res) => {
       .limit(limit)
       .sort({ createdAt: -1 })
       .toArray();
+    const normalizedRequests = requests.map(normalizeRequestPriority);
 
     const response = {
       totalItems,
-      requests,
+      requests: normalizedRequests,
       totalPages: Math.ceil(totalItems / limit),
       currentPage: page ? +parseInt(page) : 1,
     };
@@ -303,10 +336,11 @@ const getRequestsHead = async (req, res) => {
       .limit(limit)
       .sort({ createdAt: -1 })
       .toArray();
+    const normalizedRequests = requests.map(normalizeRequestPriority);
 
     const response = {
       totalItems,
-      requests,
+      requests: normalizedRequests,
       totalPages: Math.ceil(totalItems / limit),
       currentPage: page ? +parseInt(page) : 1,
     };
@@ -341,10 +375,11 @@ const getAllUserRequest = async (req, res) => {
       .limit(limit)
       .sort({ createdAt: -1 })
       .toArray();
+    const normalizedRequests = requests.map(normalizeRequestPriority);
 
     const response = {
       totalItems,
-      requests,
+      requests: normalizedRequests,
       totalPages: Math.ceil(totalItems / limit),
       currentPage: page ? +parseInt(page) : 1,
     };
@@ -369,9 +404,9 @@ const getUserRequestWaiting = async (req, res) => {
     const deptFilter = getDepartmentFilter(req.decoded);
     let filter = { ...deptFilter, ticket_status: "W" };
 
-    if (req.decoded.level !== "admin" && req.decoded.level !== "team") {
+    if (req.decoded.level !== "admin" && !isSupportEngineer(req.decoded.level)) {
       filter = { id_user: req.decoded.id, ticket_status: "W" };
-    } else if (req.decoded.level === "team" || req.decoded.level === "head") {
+    } else if (isSupportEngineer(req.decoded.level) || isManager(req.decoded.level)) {
       filter = { ...deptFilter, ticket_status: "W" };
     }
 
@@ -401,9 +436,9 @@ const getUserRequestProcess = async (req, res) => {
     const deptFilter = getDepartmentFilter(req.decoded);
     let filter = { ...deptFilter, ticket_status: "P" };
 
-    if (req.decoded.level === "team") {
+    if (isSupportEngineer(req.decoded.level)) {
       filter = { ...deptFilter, user_process: req.decoded.fullname, ticket_status: "P" };
-    } else if (req.decoded.level === "head") {
+    } else if (isManager(req.decoded.level)) {
       filter = { ...deptFilter, ticket_status: "P" };
     } else if (req.decoded.level !== "admin") {
       filter = { id_user: req.decoded.id, ticket_status: "P" };
@@ -435,9 +470,9 @@ const getUserRequestDone = async (req, res) => {
     const deptFilter = getDepartmentFilter(req.decoded);
     let filter = { ...deptFilter, ticket_status: "D" };
 
-    if (req.decoded.level === "team") {
+    if (isSupportEngineer(req.decoded.level)) {
       filter = { ...deptFilter, user_process: req.decoded.fullname, ticket_status: "D" };
-    } else if (req.decoded.level === "head") {
+    } else if (isManager(req.decoded.level)) {
       filter = { ...deptFilter, ticket_status: "D" };
     } else if (req.decoded.level !== "admin") {
       filter = { id_user: req.decoded.id, ticket_status: "D" };
@@ -478,10 +513,11 @@ const getAllUserProcess = async (req, res) => {
       .limit(limit)
       .sort({ createdAt: -1 })
       .toArray();
+    const normalizedRequests = requests.map(normalizeRequestPriority);
 
     const response = {
       totalItems,
-      requests,
+      requests: normalizedRequests,
       totalPages: Math.ceil(totalItems / limit),
       currentPage: page ? +parseInt(page) : 1,
     };
@@ -512,7 +548,7 @@ const searchData = async (req, res) => {
     const baseFilter =
       req.decoded.level === "admin"
         ? {}
-        : req.decoded.level === "team" || req.decoded.level === "head"
+        : isSupportEngineer(req.decoded.level) || isManager(req.decoded.level)
         ? deptFilter
         : { id_user: req.decoded.id };
 
@@ -531,7 +567,7 @@ const searchData = async (req, res) => {
       ],
     });
 
-    const results = await requestsCursor.toArray();
+    const results = (await requestsCursor.toArray()).map(normalizeRequestPriority);
 
     if (!results) {
       return res.status(500).json({
@@ -586,7 +622,10 @@ const getDetailRequestById = async (req, res) => {
       });
     }
 
-    const data = { ...request, id: request._id.toString() };
+    const data = {
+      ...normalizeRequestPriority(request),
+      id: request._id.toString(),
+    };
     res.status(200).json({
       status: "success",
       message: "Successfully get requests!",
@@ -617,17 +656,17 @@ const getRequestWithRequestReply = async (req, res) => {
       });
     }
 
-    if (!requestInUserDepartment(request, req.decoded)) {
+    if (!canAccessRequestConversation(request, req.decoded)) {
       return res.status(403).json({
         status: "failed",
-        message: "You can only view tickets from your department.",
+        message: "You are not allowed to view this ticket conversation.",
       });
     }
 
     res.status(200).json({
       status: "success",
       message: "Successfully get requests!",
-      data: request,
+      data: normalizeRequestPriority(request),
     });
   } catch (err) {
     console.error("Mongo getRequestWithRequestReply error:", err.message);
@@ -861,10 +900,10 @@ const reply_request = async (req, res) => {
     if (!request) {
       return res.status(404).json({ status: "failed", message: "Request not found" });
     }
-    if (!requestInUserDepartment(request, req.decoded)) {
+    if (!canAccessRequestConversation(request, req.decoded)) {
       return res.status(403).json({
         status: "failed",
-        message: "You can only reply to tickets from your department.",
+        message: "You are not allowed to reply in this ticket conversation.",
       });
     }
 
@@ -893,7 +932,7 @@ const reply_request = async (req, res) => {
 
     if (
       findRequest &&
-      req.decoded.level === "team" &&
+      isSupportEngineer(req.decoded.level) &&
       findRequest.email_request
     ) {
       let mailOptions = {
@@ -1579,7 +1618,7 @@ const getTeamDashboardStats = async (req, res) => {
         }),
         requestsCollection.countDocuments({
           ...baseFilter,
-          priority: { $in: ["High", "Critical"] },
+          priority: { $in: ["High", "high", "Critical", "critical"] },
           ticket_status: { $nin: ["C", "R"] },
         }),
         requestsCollection.countDocuments({
@@ -1648,7 +1687,10 @@ const getHeadDashboardStats = async (req, res) => {
 
     // In Work vs Free for team members in this department
     const teams = await usersCollection
-      .find({ level: "team", department: req.decoded.department })
+      .find({
+        level: { $in: ["support_engineer", "team"] },
+        department: req.decoded.department,
+      })
       .project({ full_name: 1, fullname: 1 })
       .toArray();
     const teamNames = teams.map((t) => t.full_name || t.fullname).filter(Boolean);
@@ -1750,8 +1792,10 @@ const getAdminDashboardStats = async (req, res) => {
       requestsCollection.countDocuments({ ticket_status: "C" }),
       // User stats
       usersCollection.countDocuments({}),
-      usersCollection.countDocuments({ level: "team" }),
-      usersCollection.countDocuments({ level: "head" }),
+      usersCollection.countDocuments({
+        level: { $in: ["support_engineer", "team"] },
+      }),
+      usersCollection.countDocuments({ level: { $in: ["manager", "head"] } }),
     ]);
 
     const departmentDistribution = deptAgg.map((d) => ({
@@ -1759,9 +1803,14 @@ const getAdminDashboardStats = async (req, res) => {
       count: d.count,
     }));
 
-    const priorityBreakdown = priorityAgg.map((p) => ({
-      priority: p._id,
-      count: p.count,
+    const priorityBuckets = {};
+    priorityAgg.forEach((p) => {
+      const normalized = normalizePriority(p._id);
+      priorityBuckets[normalized] = (priorityBuckets[normalized] || 0) + p.count;
+    });
+    const priorityBreakdown = Object.keys(priorityBuckets).map((priority) => ({
+      priority,
+      count: priorityBuckets[priority],
     }));
 
     const aiSuccessRate =
@@ -1827,15 +1876,7 @@ const getRequestsByPriority = async (req, res) => {
       }
 
       // Handle various cases: null, undefined, empty string, or actual priority value
-      let priority = "Medium"; // Default priority
-      
-      if (request.priority !== null && request.priority !== undefined) {
-        // Check if priority is a non-empty string
-        const priorityStr = String(request.priority).trim();
-        if (priorityStr.length > 0 && priorityStr !== "null" && priorityStr !== "undefined") {
-          priority = priorityStr;
-        }
-      }
+      const priority = normalizePriority(request.priority);
       
       if (!groupedByPriority[priority]) {
         groupedByPriority[priority] = [];
@@ -1858,8 +1899,8 @@ const getRequestsByPriority = async (req, res) => {
 
     // Convert to array format with priority name and requests
     // Only include priorities that have at least 1 ticket
-    // Sort priorities: Critical, High, Medium, Low, then others
-    const priorityOrder = ["Critical", "High", "Medium", "Low"];
+    // Sort priorities: High, Medium, Low
+    const priorityOrder = ["High", "Medium", "Low"];
     const sortedPriorities = Object.keys(groupedByPriority)
       .filter((priority) => groupedByPriority[priority].length > 0) // Only include priorities with tickets
       .sort((a, b) => {

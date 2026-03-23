@@ -6,7 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "migrate:roles": "node scripts/migrate-role-names.js",
+    "migrate:priorities": "node scripts/migrate-ticket-priorities.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

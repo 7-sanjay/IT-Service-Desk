@@ -107,11 +107,10 @@ export default function DetailRequest() {
           const fileObj =
             data.file || data.files || { image: "", file_document: "" };
 
-          const priority = data.priority || "Medium";
+          const priority =
+            data.priority === "Critical" ? "High" : (data.priority || "Medium");
           let priorityVariant = "secondary";
-          if (priority === "Critical") {
-            priorityVariant = "danger";
-          } else if (priority === "High") {
+          if (priority === "High") {
             priorityVariant = "warning";
           } else if (priority === "Medium") {
             priorityVariant = "info";
@@ -265,7 +264,7 @@ export default function DetailRequest() {
                   <li className="py-2 fs-5">
                     User Process:{" "}
                     <b className="text-success">{data.user_process}</b>
-                    {level === "admin" || level === "head" ? (
+                    {level === "admin" || level === "manager" || level === "head" ? (
                       <>
                         <br />
                         <Form.Group className="mb-3">
@@ -316,7 +315,7 @@ export default function DetailRequest() {
                   </li>
                 </ul>
               </div>
-              {level === "team" ? (
+              {level === "support_engineer" || level === "team" ? (
                 <>
                   {data.ticket_status === "D" ? null : (
                     <Button
@@ -344,7 +343,7 @@ export default function DetailRequest() {
                 </>
               ) : null}
 
-              {level === "admin" || level === "head" ? (
+              {level === "admin" || level === "manager" || level === "head" ? (
                 <Button
                   variant="primary"
                   size="lg"

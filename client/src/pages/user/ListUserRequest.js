@@ -1,12 +1,24 @@
 import React, { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faHome, faSearch, faRobot } from "@fortawesome/free-solid-svg-icons";
+import {
+  faHome,
+  faSearch,
+  faRobot,
+  faComments,
+  faEye,
+  faFilePdf,
+  faEllipsisH,
+  faCheckCircle,
+  faExclamationCircle,
+} from "@fortawesome/free-solid-svg-icons";
 import moment from "moment-timezone";
 import {
   Breadcrumb,
   Card,
   Table,
   Button,
+  Dropdown,
+  ButtonGroup,
   Form,
   Pagination,
   Nav,
@@ -179,11 +191,9 @@ export default () => {
       statusText = "Rejected";
     }
 
-    const priority = request.priority || "Medium";
+    const priority = request.priority === "Critical" ? "High" : (request.priority || "Medium");
     let priorityVariant = "secondary";
-    if (priority === "Critical") {
-      priorityVariant = "danger";
-    } else if (priority === "High") {
+    if (priority === "High") {
       priorityVariant = "warning";
     } else if (priority === "Medium") {
       priorityVariant = "info";
@@ -232,72 +242,120 @@ export default () => {
             </span>
           </td>
           <td>
-            <span className="fw-normal">
-              {/* create badge button */}
-              <Button
-                variant="info"
-                className="m-1"
-                size="sm"
-                onClick={() =>
-                  history.push(
-                    `/ticketing/detail-request/${request.id || request._id}`
-                  )
-                }
+            <Dropdown as={ButtonGroup}>
+              <Dropdown.Toggle
+                as={Button}
+                split
+                variant="link"
+                className="text-dark m-0 p-0"
               >
-                detail
-              </Button>
-              <Button
-                variant="danger"
-                className="m-1"
-                size="sm"
-                onClick={() =>
-                  window.open(
-                    `/#/ticketing/render?id=${request.id || request._id}`,
-                    "_blank"
-                  )
-                }
-              >
-                PDF
-              </Button>
-              {isUserRole && (
-                <>
-                  <Button
-                    variant="secondary"
-                    className="m-1"
-                    size="sm"
-                    onClick={() => handleAiHelp(request.id || request._id)}
-                    title="Get AI troubleshooting steps"
-                  >
-                    <FontAwesomeIcon icon={faRobot} className="me-1" />
-                    AI Help
-                  </Button>
-                  {request.ticket_status === "D" && (
-                    <>
-                      <Button
-                        variant="success"
-                        className="m-1"
-                        size="sm"
-                        onClick={() => handleConfirmDone(request.id || request._id)}
-                        disabled={resolveLoading}
-                        title="Confirm issue is solved and close ticket"
-                      >
-                        {resolveLoading ? "Closing..." : "Confirm Solved"}
-                      </Button>
-                      <Button
-                        variant="warning"
-                        className="m-1"
-                        size="sm"
-                        onClick={() => handleReopenTicket(request.id || request._id)}
-                        disabled={resolveLoading}
-                        title="Issue not solved - reopen ticket"
-                      >
-                        Issue Not Solved
-                      </Button>
-                    </>
-                  )}
-                </>
-              )}
-            </span>
+                <span className="icon icon-sm">
+                  <FontAwesomeIcon icon={faEllipsisH} className="icon-dark" />
+                </span>
+              </Dropdown.Toggle>
+
+              <Dropdown.Menu className="w-20">
+                <Dropdown.Item
+                  onClick={() =>
+                    history.push(
+                      `/ticketing/detail-request/${request.id || request._id}`
+                    )
+                  }
+                  className="d-flex align-items-center"
+                >
+                  <FontAwesomeIcon
+                    icon={faEye}
+                    className="me-2"
+                    style={{ lineHeight: 1 }}
+                  />
+                  <span className="fw-bold">Detail</span>
+                </Dropdown.Item>
+
+                <Dropdown.Item
+                  onClick={() =>
+                    history.push(
+                      `/ticketing/request/chat/${request.id || request._id}/status/${request.ticket_status}`
+                    )
+                  }
+                  className="d-flex align-items-center"
+                >
+                  <FontAwesomeIcon
+                    icon={faComments}
+                    className="me-2"
+                    style={{ lineHeight: 1 }}
+                  />
+                  <span className="fw-bold">Chat</span>
+                </Dropdown.Item>
+
+                <Dropdown.Item
+                  onClick={() =>
+                    window.open(
+                      `/#/ticketing/render?id=${request.id || request._id}`,
+                      "_blank"
+                    )
+                  }
+                  className="d-flex align-items-center"
+                >
+                  <FontAwesomeIcon
+                    icon={faFilePdf}
+                    className="me-2"
+                    style={{ lineHeight: 1 }}
+                  />
+                  <span className="fw-bold">PDF</span>
+                </Dropdown.Item>
+
+                {isUserRole && (
+                  <>
+                    <Dropdown.Item
+                      onClick={() => handleAiHelp(request.id || request._id)}
+                      title="Get AI troubleshooting steps"
+                      className="d-flex align-items-center"
+                    >
+                      <FontAwesomeIcon
+                        icon={faRobot}
+                        className="me-2"
+                        style={{ lineHeight: 1 }}
+                      />
+                      <span className="fw-bold">AI Help</span>
+                    </Dropdown.Item>
+
+                    {request.ticket_status === "D" && (
+                      <>
+                        <Dropdown.Item
+                          onClick={() => handleConfirmDone(request.id || request._id)}
+                          disabled={resolveLoading}
+                          title="Confirm issue is solved and close ticket"
+                          className="d-flex align-items-center"
+                        >
+                          <FontAwesomeIcon
+                            icon={faCheckCircle}
+                            className="me-2"
+                            style={{ lineHeight: 1 }}
+                          />
+                          <span className="fw-bold">
+                            {resolveLoading ? "Closing..." : "Confirm Solved"}
+                          </span>
+                        </Dropdown.Item>
+
+                        <Dropdown.Item
+                          onClick={() => handleReopenTicket(request.id || request._id)}
+                          disabled={resolveLoading}
+                          title="Issue not solved - reopen ticket"
+                          className="d-flex align-items-center"
+                        >
+                          <FontAwesomeIcon
+                            icon={faExclamationCircle}
+                            className="me-2"
+                            style={{ lineHeight: 1 }}
+                          />
+                          <span className="fw-bold">Issue Not Solved</span>
+                        </Dropdown.Item>
+                      </>
+                    )}
+                  </>
+                )}
+              </Dropdown.Menu>
+            </Dropdown>
           </td>
         </tr>
       </>

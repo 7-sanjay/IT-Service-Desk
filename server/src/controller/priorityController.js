@@ -1,6 +1,16 @@
 const { getDb } = require("../../config/mongo");
 const { ObjectId } = require("mongodb");
 
+const normalizePriority = (priority) => {
+  if (priority === null || priority === undefined) return "Medium";
+  const raw = String(priority).trim().toLowerCase();
+  if (raw === "low") return "Low";
+  if (raw === "medium") return "Medium";
+  if (raw === "high") return "High";
+  if (raw === "critical") return "High"; // legacy mapping
+  return null;
+};
+
 const getPriorities = (req, res) => {
   try {
     const db = getDb();
@@ -11,10 +21,18 @@ const getPriorities = (req, res) => {
       .project({ priority: 1 })
       .toArray()
       .then((priorities) => {
+        const allowed = ["Low", "Medium", "High"];
+        const normalized = Array.from(
+          new Set(
+            priorities
+              .map((p) => normalizePriority(p.priority))
+              .filter((p) => p && allowed.includes(p))
+          )
+        ).map((p) => ({ priority: p }));
         res.status(200).json({
           status: "success",
           message: "Successfully get priorities!",
-          data: priorities,
+          data: normalized,
         });
       })
       .catch((err) => {
@@ -34,14 +52,20 @@ const getPriorities = (req, res) => {
 };
 
 const createPriority = (req, res) => {
-  const { priority } = req.body;
+  const normalizedPriority = normalizePriority(req.body.priority);
+  if (!normalizedPriority) {
+    return res.status(400).json({
+      status: "failed",
+      message: "Invalid priority. Allowed values are Low, Medium, High.",
+    });
+  }
   try {
     const db = getDb();
     const prioritiesCollection = db.collection("priorities");
 
     prioritiesCollection
       .insertOne({
-        priority,
+        priority: normalizedPriority,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -49,7 +73,7 @@ const createPriority = (req, res) => {
         res.status(200).json({
           status: "success",
           message: "Successfully create priority!",
-          data: { _id: result.insertedId, priority },
+          data: { _id: result.insertedId, priority: normalizedPriority },
         });
       })
       .catch((err) => {
@@ -114,10 +138,13 @@ const searchPriority = (req, res) => {
       .project({ priority: 1 })
       .toArray()
       .then((priorities) => {
+        const normalized = priorities
+          .map((p) => ({ priority: normalizePriority(p.priority) }))
+          .filter((p) => !!p.priority);
         res.status(200).json({
           status: "success",
           message: "Successfully search priority!",
-          data: priorities,
+          data: normalized,
         });
       })
       .catch((err) => {

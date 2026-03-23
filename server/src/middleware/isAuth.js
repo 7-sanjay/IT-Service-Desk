@@ -1,4 +1,7 @@
 const jwt = require("jsonwebtoken");
+const isManager = (level) => level === "manager" || level === "head";
+const isSupportEngineer = (level) =>
+  level === "support_engineer" || level === "team";
 
 exports.isAdmin = (req, res, next) => {
   const token = req.header("Authorization");
@@ -16,7 +19,7 @@ exports.isAdmin = (req, res, next) => {
         status: "failed",
         message: "Unauthorized. Please sign in first.",
       });
-    } else if (decoded.level !== "admin" && decoded.level !== "head") {
+    } else if (decoded.level !== "admin" && !isManager(decoded.level)) {
       return res.status(401).json({
         status: "failed",
         message: "Unauthorized. only admin can access this resource",
@@ -43,10 +46,10 @@ exports.isTeam = (req, res, next) => {
         status: "failed",
         message: "Unauthorized. Please sign in first.",
       });
-    } else if (decoded.level !== "team") {
+    } else if (!isSupportEngineer(decoded.level)) {
       return res.status(401).json({
         status: "failed",
-        message: "Unauthorized. only team can access this resource",
+        message: "Unauthorized. only support engineer can access this resource",
       });
     }
     req.decoded = decoded;
@@ -92,10 +95,15 @@ exports.isTeamHeadAdmin = (req, res, next) => {
         status: "failed",
         message: "Unauthorized. Please sign in first.",
       });
-    } else if (decoded.level !== "admin" && decoded.level !== "head" && decoded.level !== "team") {
+    } else if (
+      decoded.level !== "admin" &&
+      !isManager(decoded.level) &&
+      !isSupportEngineer(decoded.level)
+    ) {
       return res.status(401).json({
         status: "failed",
-        message: "Unauthorized. Only team, head, and admin can access this resource",
+        message:
+          "Unauthorized. Only support engineer, manager, and admin can access this resource",
       });
     }
     req.decoded = decoded;

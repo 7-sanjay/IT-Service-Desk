@@ -48,10 +48,10 @@ export default () => {
         if (level === "user") {
           const res = await getUserDashboardStats();
           setUserStats(res.data.data);
-        } else if (level === "team") {
+        } else if (level === "support_engineer" || level === "team") {
           const res = await getTeamDashboardStats();
           setTeamStats(res.data.data);
-        } else if (level === "head") {
+        } else if (level === "manager" || level === "head") {
           const [headRes, usersRes, teamsRes] = await Promise.all([
             getHeadDashboardStats(),
             getUsersCount(),
@@ -144,7 +144,7 @@ export default () => {
           </>
         )}
 
-        {level === "team" && teamStats && (
+        {(level === "support_engineer" || level === "team") && teamStats && (
           <>
             <Col xs={12} sm={6} xl={3} className="mb-4">
               <CounterWidget
@@ -189,7 +189,7 @@ export default () => {
           </>
         )}
 
-        {level === "head" && headStats && (
+        {(level === "manager" || level === "head") && headStats && (
           <>
             <Col xs={12} sm={6} xl={3} className="mb-4">
               <CounterWidget

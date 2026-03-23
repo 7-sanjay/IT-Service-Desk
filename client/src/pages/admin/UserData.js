@@ -26,6 +26,14 @@ import {
 } from "../../api/userApi";
 
 export default () => {
+  const roleLabel = (level) => {
+    if (level === "support_engineer" || level === "team")
+      return "Support Engineer";
+    if (level === "manager" || level === "head") return "Manager";
+    if (level === "admin") return "Admin";
+    if (level === "user") return "User";
+    return level;
+  };
   const [listUsers, setListUsers] = useState([]);
   const [showDefault, setShowDefault] = useState(false);
   const [isPending, setIsPending] = useState(false);
@@ -49,8 +57,17 @@ export default () => {
     setUser(initialUser);
     setLevelUser(false);
   };
-  const listLevel = ["admin", "head", "team", "user"];
-  const showDepartment = user.level === "team" || user.level === "head";
+  const listLevel = [
+    { value: "admin", label: "Admin" },
+    { value: "manager", label: "Manager" },
+    { value: "support_engineer", label: "Support Engineer" },
+    { value: "user", label: "User" },
+  ];
+  const showDepartment =
+    user.level === "support_engineer" ||
+    user.level === "manager" ||
+    user.level === "team" ||
+    user.level === "head";
 
   useEffect(() => {
     (async () => {
@@ -71,11 +88,11 @@ export default () => {
       const getUsers = await getAllUserAdmin();
       setLevelUser(true);
       setListUsers(getUsers.data.data);
-    } else if (value === "team") {
+    } else if (value === "support_engineer" || value === "team") {
       const getUsers = await getAllUserTeam();
       setLevelUser(true);
       setListUsers(getUsers.data.data);
-    } else if (value === "head") {
+    } else if (value === "manager" || value === "head") {
       const getUsers = await getAllUserHead();
       setLevelUser(true);
       setListUsers(getUsers.data.data);
@@ -89,6 +106,8 @@ export default () => {
   const handleChangeUserLevel = (e) => {
     if (
       e.target.value === "admin" ||
+      e.target.value === "support_engineer" ||
+      e.target.value === "manager" ||
       e.target.value === "team" ||
       e.target.value === "head"
     ) {
@@ -166,12 +185,15 @@ export default () => {
             <span className="fw-normal">{request.email}</span>
           </td>
           <td>
-            <span className="fw-normal">{request.level}</span>
+            <span className="fw-normal">{roleLabel(request.level)}</span>
           </td>
           {levelUser ? (
             <td>
               <span className="fw-normal">
-                {request.level === "team" || request.level === "head"
+                {request.level === "support_engineer" ||
+                request.level === "manager" ||
+                request.level === "team" ||
+                request.level === "head"
                   ? request.department || "—"
                   : "—"}
               </span>
@@ -188,7 +210,12 @@ export default () => {
                     full_name: request.full_name,
                     username: request.username,
                     email: request.email,
-                    level: request.level,
+                    level:
+                      request.level === "team"
+                        ? "support_engineer"
+                        : request.level === "head"
+                        ? "manager"
+                        : request.level,
                     department: request.department || "",
                     password: "",
                   });
@@ -254,10 +281,10 @@ export default () => {
               }}
             >
               <option defaultValue>Choose user type</option>
-              <option value="admin">admin</option>
-              <option value="head">head</option>
-              <option value="team">team</option>
-              <option value="user">user</option>
+              <option value="admin">Admin</option>
+              <option value="manager">Manager</option>
+              <option value="support_engineer">Support Engineer</option>
+              <option value="user">User</option>
             </Form.Select>
           </Form.Group>
         </Col>
@@ -336,20 +363,26 @@ export default () => {
                   setUser({
                     ...user,
                     level,
-                    department: level === "team" || level === "head" ? user.department : "",
+                    department:
+                      level === "support_engineer" ||
+                      level === "manager" ||
+                      level === "team" ||
+                      level === "head"
+                        ? user.department
+                        : "",
                   });
                 }}
               >
                 <option defaultValue>Choose user level</option>
                 {listLevel.map((level) => {
-                  if (level === user.level) {
+                  if (level.value === user.level) {
                     return (
-                      <option value={level} selected>
-                        {level}
+                      <option value={level.value} selected>
+                        {level.label}
                       </option>
                     );
                   } else {
-                    return <option value={level}>{level}</option>;
+                    return <option value={level.value}>{level.label}</option>;
                   }
                 })}
               </Form.Select>

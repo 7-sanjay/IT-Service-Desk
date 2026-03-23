@@ -92,8 +92,6 @@ export default () => {
 
   const getPriorityVariant = (priority) => {
     switch (priority) {
-      case "Critical":
-        return "danger";
       case "High":
         return "warning";
       case "Medium":
@@ -109,7 +107,8 @@ export default () => {
     if (!request) return null;
     
     const statusInfo = getStatusInfo(request.ticket_status);
-    const priority = request.priority || "Medium";
+    const priority =
+      request.priority === "Critical" ? "High" : (request.priority || "Medium");
     const priorityVariant = getPriorityVariant(priority);
     const changeDate = request.createdAt 
       ? moment(request.createdAt).format("DD-MM-YYYY HH:mm")

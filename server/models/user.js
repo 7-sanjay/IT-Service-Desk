@@ -13,7 +13,18 @@ const User = sequelize.define("user", {
   DepartmentID: DataTypes.INTEGER,
   username: DataTypes.STRING,
   email: DataTypes.STRING,
-  level: DataTypes.STRING,
+  level: {
+    type: DataTypes.ENUM(
+      "admin",
+      "user",
+      "support_engineer",
+      "manager",
+      // legacy values kept for backward compatibility during migration
+      "team",
+      "head"
+    ),
+    allowNull: true,
+  },
   last_login: DataTypes.DATE,
   image_login: DataTypes.STRING,
   createdAt: DataTypes.DATE,

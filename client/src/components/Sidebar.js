@@ -300,7 +300,7 @@ export default (props = {}) => {
                 </>
               ) : null}
 
-              {level === "team" ? (
+              {level === "support_engineer" || level === "team" ? (
                 <>
                   <NavItem
                     title="User Requests"
@@ -328,7 +328,7 @@ export default (props = {}) => {
                 </>
               ) : null}
 
-              {level === "head" ? (
+              {level === "manager" || level === "head" ? (
                 <>
                   <NavItem
                     title="User Requests"

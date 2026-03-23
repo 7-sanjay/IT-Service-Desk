@@ -8,6 +8,7 @@ import {
   faCheckCircle,
   faEdit,
   faSearch,
+  faComments,
 } from "@fortawesome/free-solid-svg-icons";
 import moment from "moment-timezone";
 import {
@@ -191,11 +192,9 @@ export default () => {
       statusText = "Rejected";
     }
 
-    const priority = request.priority || "Medium";
+    const priority = request.priority === "Critical" ? "High" : (request.priority || "Medium");
     let priorityVariant = "secondary";
-    if (priority === "Critical") {
-      priorityVariant = "danger";
-    } else if (priority === "High") {
+    if (priority === "High") {
       priorityVariant = "warning";
     } else if (priority === "Medium") {
       priorityVariant = "info";
@@ -259,6 +258,15 @@ export default () => {
                   }}
                 >
                   <FontAwesomeIcon icon={faEye} className="me-2" /> Details
+                </Dropdown.Item>
+                <Dropdown.Item
+                  onClick={() => {
+                    history.push(
+                      `/ticketing/request/chat/${request.id || request._id}/status/${request.ticket_status}`
+                    );
+                  }}
+                >
+                  <FontAwesomeIcon icon={faComments} className="me-2" /> Chat
                 </Dropdown.Item>
 
                 {request.ticket_status === "P" ? (

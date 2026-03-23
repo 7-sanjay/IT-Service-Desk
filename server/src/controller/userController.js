@@ -3,15 +3,26 @@ const bcrypt = require("bcryptjs");
 const { ObjectId } = require("mongodb");
 const { getDb } = require("../../config/mongo");
 
+const normalizeLevel = (level) => {
+  if (level === "team") return "support_engineer";
+  if (level === "head") return "manager";
+  return level;
+};
+
+const isSupportEngineer = (level) =>
+  level === "support_engineer" || level === "team";
+const isManager = (level) => level === "manager" || level === "head";
+
 const createToken = (user) => {
+  const normalizedLevel = normalizeLevel(user.level);
   const payload = {
     id: user.id,
     username: user.username,
     fullname: user.full_name,
     email: user.email,
-    level: user.level,
+    level: normalizedLevel,
   };
-  if (user.level === "team" || user.level === "head") {
+  if (isSupportEngineer(normalizedLevel) || isManager(normalizedLevel)) {
     payload.department = user.department || null;
   }
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1d" });
@@ -95,9 +106,16 @@ const loginUser = async (req, res) => {
       username: user.username,
       full_name: user.full_name,
       email: user.email,
-      level: user.level,
+      level: normalizeLevel(user.level),
       department: user.department,
     });
+
+    if (user.level !== normalizeLevel(user.level)) {
+      await usersCollection.updateOne(
+        { _id: user._id },
+        { $set: { level: normalizeLevel(user.level), updatedAt: new Date() } }
+      );
+    }
 
     return res.status(200).json({
       status: "success",
@@ -105,7 +123,7 @@ const loginUser = async (req, res) => {
       data: {
         username: user.username,
         fullname: user.full_name,
-        level: user.level,
+        level: normalizeLevel(user.level),
         email: user.email,
         token: token,
       },
@@ -149,7 +167,7 @@ const getAllUserWithUsernameTeam = async (req, res) => {
     const usersCollection = db.collection("users");
 
     const users = await usersCollection
-      .find({ level: "team" })
+      .find({ level: { $in: ["support_engineer", "team"] } })
       .project({ full_name: 1, username: 1, email: 1, level: 1, department: 1 })
       .toArray();
 
@@ -204,7 +222,7 @@ const getAllUserHead = async (req, res) => {
     const usersCollection = db.collection("users");
 
     const users = await usersCollection
-      .find({ level: "head" })
+      .find({ level: { $in: ["manager", "head"] } })
       .project({ full_name: 1, username: 1, email: 1, level: 1, department: 1 })
       .toArray();
 
@@ -233,6 +251,7 @@ const DEPARTMENTS = ["IT", "HR", "Finance", "Sales"];
 
 const createUser = async (req, res) => {
   const { id_karyawan, full_name, username, email, level, password, department } = req.body;
+  const normalizedLevel = normalizeLevel(level);
 
   try {
     const db = getDb();
@@ -245,10 +264,14 @@ const createUser = async (req, res) => {
       });
     }
 
-    if ((level === "team" || level === "head") && (!department || !DEPARTMENTS.includes(department))) {
+    if (
+      (isSupportEngineer(normalizedLevel) || isManager(normalizedLevel)) &&
+      (!department || !DEPARTMENTS.includes(department))
+    ) {
       return res.status(400).json({
         status: "failed",
-        message: "Department (IT, HR, Finance, or Sales) is required for team and head users.",
+        message:
+          "Department (IT, HR, Finance, or Sales) is required for support engineer and manager users.",
       });
     }
 
@@ -259,9 +282,12 @@ const createUser = async (req, res) => {
       full_name,
       username,
       email,
-      level,
+      level: normalizedLevel,
       password: hashedPassword,
-      department: level === "team" || level === "head" ? department : null,
+      department:
+        isSupportEngineer(normalizedLevel) || isManager(normalizedLevel)
+          ? department
+          : null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -307,6 +333,7 @@ const deleteUserById = async (req, res) => {
 const updateUser = async (req, res) => {
   const { id_user } = req.params;
   const { full_name, username, email, level, password, department } = req.body;
+  const normalizedLevel = normalizeLevel(level);
 
   try {
     const db = getDb();
@@ -316,15 +343,16 @@ const updateUser = async (req, res) => {
       full_name,
       username,
       email,
-      level,
+      level: normalizedLevel,
       updatedAt: new Date(),
     };
 
-    if (level === "team" || level === "head") {
+    if (isSupportEngineer(normalizedLevel) || isManager(normalizedLevel)) {
       if (!department || !DEPARTMENTS.includes(department)) {
         return res.status(400).json({
           status: "failed",
-          message: "Department (IT, HR, Finance, or Sales) is required for team and head users.",
+          message:
+            "Department (IT, HR, Finance, or Sales) is required for support engineer and manager users.",
         });
         }
       updateDoc.department = department;
@@ -381,7 +409,9 @@ const getLevelTeamCount = async (req, res) => {
   try {
     const db = getDb();
     const usersCollection = db.collection("users");
-    const userCount = await usersCollection.countDocuments({ level: "team" });
+    const userCount = await usersCollection.countDocuments({
+      level: { $in: ["support_engineer", "team"] },
+    });
 
     res.status(200).json({
       status: "success",
