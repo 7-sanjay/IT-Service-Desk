@@ -24,6 +24,7 @@ export const Routes = {
   // BOTH
   Profile: { path: "/ticketing/profile" },
   DashboardOverview: { path: "/ticketing/dashboard/overview" },
+  Sla: { path: "/ticketing/sla" },
   DetailRequest: { path: "/ticketing/detail-request/:id" },
   Chat: { path: "/ticketing/request/chat/:id/status/:status_ticket" },
   Upgrade: { path: "/ticketing/upgrade" },

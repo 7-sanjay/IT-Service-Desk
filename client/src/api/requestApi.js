@@ -147,3 +147,24 @@ export const getHeadDashboardStats = () => {
 export const getAdminDashboardStats = () => {
   return api.get("/dashboard/admin");
 };
+
+// SLA
+export const getSlaRules = () => {
+  return api.get("/sla");
+};
+
+export const createSlaRule = (data) => {
+  return api.post("/sla", data);
+};
+
+export const updateSlaRule = (id, data) => {
+  return api.put(`/sla/${id}`, data);
+};
+
+export const deleteSlaRule = (id) => {
+  return api.delete(`/sla/${id}`);
+};
+
+export const getSlaStatus = () => {
+  return api.get("/tickets/sla-status");
+};

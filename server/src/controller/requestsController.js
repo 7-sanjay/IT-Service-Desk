@@ -68,6 +68,12 @@ const normalizeRequestPriority = (request) => ({
   priority: normalizePriority(request.priority),
 });
 
+const getSlaForPriority = async (db, priority) => {
+  const slaCollection = db.collection("SLA");
+  const normalized = normalizePriority(priority);
+  return slaCollection.findOne({ priority: normalized });
+};
+
 // Determine ticket priority (Low/Medium/High)
 const determinePriority = (category = "", title = "", subject = "") => {
   const text = `${category} ${title} ${subject}`.toLowerCase();
@@ -205,6 +211,13 @@ const createRequest = async (req, res) => {
     }
 
     const now = new Date();
+    const slaRule = await getSlaForPriority(db, priority);
+    const responseDueAt = slaRule
+      ? new Date(now.getTime() + slaRule.responseTime * 60 * 1000)
+      : null;
+    const resolutionDueAt = slaRule
+      ? new Date(now.getTime() + slaRule.resolutionTime * 60 * 1000)
+      : null;
     const insertResult = await requestsCollection.insertOne({
       id_user: req.decoded.id,
       user_request: req.decoded.username,
@@ -218,6 +231,13 @@ const createRequest = async (req, res) => {
       start_process_ticket: now, // Timer starts when ticket is created
       end_date_ticket: null,
       accumulated_time_ms: 0, // Track accumulated time when ticket is paused/resumed
+      responseDueAt,
+      resolutionDueAt,
+      respondedAt: null,
+      resolvedAt: null,
+      responseSLA: null,
+      resolutionSLA: null,
+      escalated: false,
       createdAt: now,
       updatedAt: now,
       // Keep original field names expected by frontend
@@ -810,6 +830,18 @@ const approveRequestTeam = async (req, res) => {
       updatedAt: now,
     };
 
+    if (!request.respondedAt) {
+      updateData.respondedAt = now;
+      if (request.responseDueAt) {
+        updateData.responseSLA =
+          now.getTime() <= new Date(request.responseDueAt).getTime()
+            ? "Met"
+            : "Breached";
+      } else {
+        updateData.responseSLA = "Met";
+      }
+    }
+
     // Ensure start_process_ticket is set (use createdAt if not set, for backward compatibility)
     if (!request.start_process_ticket) {
       updateData.start_process_ticket = request.createdAt || now;
@@ -995,6 +1027,7 @@ const requestDone = async (req, res) => {
       ticket_status: "D",
       end_date_ticket: now, // Set end date when team marks as Done
       updatedAt: now,
+      resolvedAt: now,
     };
 
     // Calculate accumulated time if ticket was previously in progress
@@ -1004,6 +1037,16 @@ const requestDone = async (req, res) => {
       updateData.accumulated_time_ms = currentAccumulated + elapsedMs;
       // Reset start_process_ticket to null since timer is paused
       updateData.start_process_ticket = null;
+    }
+
+    if (request.resolutionDueAt) {
+      const breached = now.getTime() > new Date(request.resolutionDueAt).getTime();
+      updateData.resolutionSLA = breached ? "Breached" : "Met";
+      if (breached) {
+        updateData.escalated = true;
+      }
+    } else {
+      updateData.resolutionSLA = "Met";
     }
 
     const updateStatus = await requestsCollection.updateOne(
@@ -1213,6 +1256,7 @@ const escalateRequest = async (req, res) => {
     const updateData = {
       ticket_status: "E",
       updatedAt: now,
+      escalated: true,
     };
 
     // Pause timer when escalating - accumulate time and reset start_process_ticket

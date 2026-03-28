@@ -59,7 +59,21 @@ const {
   deletePriority,
   searchPriority,
 } = require("../src/controller/priorityController");
-const { isAuth, isAdmin, isTeam, isTeamHeadAdmin } = require("../src/middleware/isAuth");
+const {
+  isAuth,
+  isAdmin,
+  isTeam,
+  isTeamHeadAdmin,
+  isStrictAdmin,
+  isManagerOrAdmin,
+} = require("../src/middleware/isAuth");
+const {
+  createSlaRule,
+  getAllSlaRules,
+  updateSlaRule,
+  deleteSlaRule,
+  getSlaStatus,
+} = require("../src/controller/slaController");
 const multer = require("multer");
 const uuid = require("uuid");
 
@@ -148,6 +162,13 @@ router.get("/requests-waiting", isAuth, getUserRequestWaiting);
 router.get("/requests-process", isAuth, getUserRequestProcess);
 router.get("/requests-done", isAuth, getUserRequestDone);
 router.get("/request/search", isAuth, searchData);
+router.get("/tickets/sla-status", isManagerOrAdmin, getSlaStatus);
+
+// SLA
+router.post("/sla", isStrictAdmin, createSlaRule);
+router.get("/sla", isAuth, getAllSlaRules);
+router.put("/sla/:id", isStrictAdmin, updateSlaRule);
+router.delete("/sla/:id", isStrictAdmin, deleteSlaRule);
 // router.get("/request/paginate", paginateData);
 
 module.exports = router;

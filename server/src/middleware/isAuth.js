@@ -110,3 +110,46 @@ exports.isTeamHeadAdmin = (req, res, next) => {
     next();
   });
 };
+
+exports.isStrictAdmin = (req, res, next) => {
+  const token = req.header("Authorization");
+  if (!token) {
+    return res.status(401).json({ status: "failed", message: "Unauthorized" });
+  }
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res
+        .status(401)
+        .json({ status: "failed", message: "Unauthorized. Please sign in first." });
+    }
+    if (decoded.level !== "admin") {
+      return res
+        .status(401)
+        .json({ status: "failed", message: "Unauthorized. Only admin can access this resource" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};
+
+exports.isManagerOrAdmin = (req, res, next) => {
+  const token = req.header("Authorization");
+  if (!token) {
+    return res.status(401).json({ status: "failed", message: "Unauthorized" });
+  }
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res
+        .status(401)
+        .json({ status: "failed", message: "Unauthorized. Please sign in first." });
+    }
+    if (decoded.level !== "admin" && !isManager(decoded.level)) {
+      return res.status(401).json({
+        status: "failed",
+        message: "Unauthorized. Only manager and admin can access this resource",
+      });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};

@@ -50,6 +50,18 @@ export default () => {
   const [reassignLoading, setReassignLoading] = useState(false);
   const history = useHistory();
 
+  const getSlaTimer = (dueAt, completedAt) => {
+    if (!dueAt) return { text: "-", color: "secondary" };
+    if (completedAt) return { text: "Completed", color: "success" };
+    const diffMs = new Date(dueAt).getTime() - Date.now();
+    const totalMin = Math.floor(Math.abs(diffMs) / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (diffMs < 0) return { text: `Breached by ${h}h ${m}m`, color: "danger" };
+    if (totalMin <= 30) return { text: `${h}h ${m}m left`, color: "warning" };
+    return { text: `${h}h ${m}m left`, color: "success" };
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -180,6 +192,8 @@ export default () => {
 
     const requestDetail =
       request.requests_detail || request.detail || { title_request: "" };
+    const responseTimer = getSlaTimer(request.responseDueAt, request.respondedAt);
+    const resolutionTimer = getSlaTimer(request.resolutionDueAt, request.resolvedAt);
 
     return (
       <>
@@ -208,6 +222,12 @@ export default () => {
             <span className={`fw-normal text-${statusVariant}`}>
               {statusText}
             </span>
+          </td>
+          <td>
+            <span className={`fw-normal text-${responseTimer.color}`}>{responseTimer.text}</span>
+          </td>
+          <td>
+            <span className={`fw-normal text-${resolutionTimer.color}`}>{resolutionTimer.text}</span>
           </td>
           <td>
             <Dropdown as={ButtonGroup}>
@@ -340,6 +360,8 @@ export default () => {
                 <th className="border-bottom">User process</th>
                 <th className="border-bottom">Priority</th>
                 <th className="border-bottom">Status request</th>
+                <th className="border-bottom">Response SLA</th>
+                <th className="border-bottom">Resolution SLA</th>
                 <th className="border-bottom">Action</th>
               </tr>
             </thead>

@@ -14,6 +14,7 @@ import {
   faUser,
   faUsers,
   faFlag,
+  faClock,
 } from "@fortawesome/free-solid-svg-icons";
 import {
   Nav,
@@ -272,6 +273,11 @@ export default (props = {}) => {
                     icon={faUserCircle}
                     link={Routes.Profile.path}
                   />
+                  <NavItem
+                    title="SLA"
+                    icon={faClock}
+                    link={Routes.Sla.path}
+                  />
                 </>
               ) : null}
 
@@ -325,6 +331,11 @@ export default (props = {}) => {
                     icon={faUserCircle}
                     link={Routes.Profile.path}
                   />
+                  <NavItem
+                    title="SLA"
+                    icon={faClock}
+                    link={Routes.Sla.path}
+                  />
                 </>
               ) : null}
 
@@ -346,6 +357,11 @@ export default (props = {}) => {
                     title="Profile"
                     icon={faUserCircle}
                     link={Routes.Profile.path}
+                  />
+                  <NavItem
+                    title="SLA"
+                    icon={faClock}
+                    link={Routes.Sla.path}
                   />
                 </>
               ) : null}

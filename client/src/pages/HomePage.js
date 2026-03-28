@@ -26,6 +26,7 @@ import NotFoundPage from "./examples/NotFound";
 import ServerError from "./examples/ServerError";
 import AddRequest from "./user/AddRequest";
 import RenderPdf from "./utils/RenderPdf";
+import SlaDashboard from "./sla/SlaDashboard";
 
 // components
 import Sidebar from "../components/Sidebar";
@@ -172,6 +173,7 @@ export default () => (
       path={Routes.DashboardOverview.path}
       component={DashboardOverview}
     />
+    <RouteWithSidebar exact path={Routes.Sla.path} component={SlaDashboard} />
     <RouteWithSidebar exact path={Routes.Upgrade.path} component={Upgrade} />
 
     <RouteWithSidebar exact path={Routes.Profile.path} component={Settings} />

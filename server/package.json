@@ -8,7 +8,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "migrate:roles": "node scripts/migrate-role-names.js",
-    "migrate:priorities": "node scripts/migrate-ticket-priorities.js"
+    "migrate:priorities": "node scripts/migrate-ticket-priorities.js",
+    "migrate:sla": "node scripts/migrate-sla-fields.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
