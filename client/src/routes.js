@@ -22,6 +22,7 @@ export const Routes = {
   RequestReport: { path: "/ticketing/team/report-requests" },
 
   // BOTH
+  ChangePassword: { path: "/ticketing/change-password" },
   Profile: { path: "/ticketing/profile" },
   DashboardOverview: { path: "/ticketing/dashboard/overview" },
   Sla: { path: "/ticketing/sla" },

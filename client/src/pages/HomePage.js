@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Route, Switch, Redirect } from "react-router-dom";
+import { Route, Switch, Redirect, useLocation } from "react-router-dom";
 import { Routes } from "../routes";
 
 // pages
@@ -15,6 +15,7 @@ import Chat from "./utils/Chat";
 import Settings from "./Settings";
 import ListUserRequests from "./user/ListUserRequest";
 import Signin from "./user/Signin";
+import ChangePassword from "./user/ChangePassword";
 // import SigninAdmin from "./admin/SigninAdmin";
 import UserRequestTeam from "./team/UserRequestTeam";
 import ReportRequest from "./team/ReportRequest";
@@ -33,6 +34,19 @@ import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
 import Preloader from "../components/Preloader";
 import ListRequest from "./head/ListRequest";
+
+function tokenRequiresPasswordChange(token) {
+  if (!token) return false;
+  try {
+    const part = token.split(".")[1];
+    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded));
+    return Boolean(payload.mustChangePassword);
+  } catch (e) {
+    return false;
+  }
+}
 
 const RouteWithLoader = ({ component: Component, ...rest }) => {
   const [loaded, setLoaded] = useState(false);
@@ -57,26 +71,37 @@ const RouteWithLoader = ({ component: Component, ...rest }) => {
 
 const RouteWithSidebar = ({ component: Component, ...rest }) => {
   const [loaded, setLoaded] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     const timer = setTimeout(() => setLoaded(true), 1000);
     return () => clearTimeout(timer);
   }, []);
 
+  const token = localStorage.getItem("token");
+  const blockForPassword =
+    token &&
+    tokenRequiresPasswordChange(token) &&
+    location.pathname !== Routes.ChangePassword.path;
+
   return (
     <Route
       {...rest}
-      render={(props) => (
-        <>
-          <Preloader show={loaded ? false : true} />
-          <Sidebar />
+      render={(props) =>
+        blockForPassword ? (
+          <Redirect to={Routes.ChangePassword.path} />
+        ) : (
+          <>
+            <Preloader show={loaded ? false : true} />
+            <Sidebar />
 
-          <main className="content">
-            <Navbar />
-            <Component {...props} />
-          </main>
-        </>
-      )}
+            <main className="content">
+              <Navbar />
+              <Component {...props} />
+            </main>
+          </>
+        )
+      }
     />
   );
 };
@@ -84,6 +109,11 @@ const RouteWithSidebar = ({ component: Component, ...rest }) => {
 export default () => (
   <Switch>
     <RouteWithLoader exact path={Routes.Signin.path} component={Signin} />
+    <RouteWithLoader
+      exact
+      path={Routes.ChangePassword.path}
+      component={ChangePassword}
+    />
     {/* <RouteWithLoader
       exact
       path={Routes.SigninAdmin.path}

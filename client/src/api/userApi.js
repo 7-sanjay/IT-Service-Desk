@@ -20,6 +20,10 @@ export const updateUserData = (id, data) => {
   return api.put(`/user/${id}`, data);
 };
 
+export const changeOwnPassword = (data) => {
+  return api.put("/user/me/password", data);
+};
+
 export const getAllUserAdmin = () => {
   return api.get("/admins");
 };

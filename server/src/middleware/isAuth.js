@@ -3,6 +3,22 @@ const isManager = (level) => level === "manager" || level === "head";
 const isSupportEngineer = (level) =>
   level === "support_engineer" || level === "team";
 
+const isChangePasswordRequest = (req) =>
+  req.method === "PUT" &&
+  req.originalUrl.split("?")[0].replace(/\/+$/, "").endsWith("/user/me/password");
+
+const rejectIfMustChangePassword = (req, res, decoded) => {
+  if (!decoded.mustChangePassword || isChangePasswordRequest(req)) {
+    return true;
+  }
+  res.status(403).json({
+    status: "failed",
+    message: "You must change your password before continuing.",
+    code: "MUST_CHANGE_PASSWORD",
+  });
+  return false;
+};
+
 exports.isAdmin = (req, res, next) => {
   const token = req.header("Authorization");
 
@@ -26,6 +42,7 @@ exports.isAdmin = (req, res, next) => {
       });
     }
     req.decoded = decoded;
+    if (!rejectIfMustChangePassword(req, res, decoded)) return;
     next();
   });
 };
@@ -53,6 +70,7 @@ exports.isTeam = (req, res, next) => {
       });
     }
     req.decoded = decoded;
+    if (!rejectIfMustChangePassword(req, res, decoded)) return;
     next();
   });
 };
@@ -75,6 +93,7 @@ exports.isAuth = (req, res, next) => {
       });
     }
     req.decoded = decoded;
+    if (!rejectIfMustChangePassword(req, res, decoded)) return;
     next();
   });
 };
@@ -107,6 +126,7 @@ exports.isTeamHeadAdmin = (req, res, next) => {
       });
     }
     req.decoded = decoded;
+    if (!rejectIfMustChangePassword(req, res, decoded)) return;
     next();
   });
 };
@@ -128,6 +148,7 @@ exports.isStrictAdmin = (req, res, next) => {
         .json({ status: "failed", message: "Unauthorized. Only admin can access this resource" });
     }
     req.decoded = decoded;
+    if (!rejectIfMustChangePassword(req, res, decoded)) return;
     next();
   });
 };
@@ -150,6 +171,7 @@ exports.isManagerOrAdmin = (req, res, next) => {
       });
     }
     req.decoded = decoded;
+    if (!rejectIfMustChangePassword(req, res, decoded)) return;
     next();
   });
 };

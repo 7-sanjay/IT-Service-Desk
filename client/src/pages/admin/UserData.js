@@ -120,15 +120,29 @@ export default () => {
   const handleCreateUser = async (e) => {
     e.preventDefault();
 
-    const createUser = await createUserData(user);
-
-    if (createUser.error) {
-      toast.error("Create user failed");
+    const { password: _p, ...createPayload } = user;
+    try {
+      const res = await createUserData(createPayload);
+      const created = res.data.data;
+      const { temporaryPassword, ...createdForList } = created;
+      setListUsers((prev) => [...prev, createdForList]);
+      setShowDefault(false);
+      setUser(initialUser);
+      if (created.emailSent === false && temporaryPassword) {
+        toast.warning(res.data.message, { autoClose: 14000 });
+        toast.info(`Temporary password (copy now): ${temporaryPassword}`, {
+          autoClose: false,
+        });
+      } else {
+        toast.success(
+          res.data.message ||
+            "User created. A temporary password was sent to their email."
+        );
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || "Create user failed";
+      toast.error(msg);
     }
-
-    listUsers.push(createUser.data.data);
-    setShowDefault(false);
-    toast.success("Create user success");
   };
 
   const handleDeleteUser = async (id, level) => {
@@ -445,21 +459,25 @@ export default () => {
               </Form.Group>
             ) : null}
 
-            <Form.Group controlId="password" className="mb-3">
-              <Form.Label>Password</Form.Label>
-              <Form.Control
-                type="password"
-                id="password"
-                value={user.password}
-                placeholder={
-                  isUpdate ? "Leave blank to keep current password" : ""
-                }
-                required={!isUpdate}
-                onChange={(e) =>
-                  setUser({ ...user, password: e.target.value })
-                }
-              />
-            </Form.Group>
+            {isUpdate ? (
+              <Form.Group controlId="password" className="mb-3">
+                <Form.Label>Password</Form.Label>
+                <Form.Control
+                  type="password"
+                  id="password"
+                  value={user.password}
+                  placeholder="Leave blank to keep current password"
+                  onChange={(e) =>
+                    setUser({ ...user, password: e.target.value })
+                  }
+                />
+              </Form.Group>
+            ) : (
+              <p className="text-muted small mb-0">
+                A random temporary password will be emailed to the user. They
+                will set their own password after first login.
+              </p>
+            )}
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" type="submit">

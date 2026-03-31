@@ -9,6 +9,7 @@ import {
 import { getAllUserTeam } from "../../api/userApi";
 import { toast } from "react-toastify";
 import moment from "moment-timezone";
+import { businessMsBetweenIst } from "../../utils/slaTime";
 import { Routes } from "../../routes";
 
 export default function DetailRequest() {
@@ -176,9 +177,10 @@ export default function DetailRequest() {
 
                         // Calculate current elapsed time if ticket is in progress (status P)
                         if (data.start_process_ticket && data.ticket_status === "P") {
-                          const start = moment(data.start_process_ticket);
-                          const now = moment();
-                          currentElapsedMs = now.diff(start);
+                          currentElapsedMs = businessMsBetweenIst(
+                            data.start_process_ticket,
+                            new Date()
+                          );
                         }
                         // If ticket is Done (status D), start_process_ticket should be null and time is in accumulated_time_ms
                         // If ticket is Closed (status C), use accumulated time only
@@ -188,9 +190,10 @@ export default function DetailRequest() {
                         if (totalMs === 0) {
                           // Fallback: if no accumulated time and ticket is Done/Closed, try to calculate from dates
                           if ((data.ticket_status === "D" || data.ticket_status === "C") && data.end_date_ticket && data.createdAt) {
-                            const start = moment(data.createdAt);
-                            const end = moment(data.end_date_ticket);
-                            const fallbackMs = end.diff(start);
+                            const fallbackMs = businessMsBetweenIst(
+                              data.createdAt,
+                              data.end_date_ticket
+                            );
                             if (fallbackMs > 0) {
                               const duration = moment.duration(fallbackMs);
                               const days = Math.floor(duration.asDays());

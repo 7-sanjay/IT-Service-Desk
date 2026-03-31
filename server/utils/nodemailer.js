@@ -61,14 +61,14 @@ const { OAuth2 } = google.auth;
 //   }
 // });
 
+// Port 587 = STARTTLS → secure must be false. (465 = implicit TLS → secure: true)
 const transporter = nodemailer.createTransport({
-  service: "gmail",
   host: "smtp.gmail.com",
   port: 587,
-  secure: true,
+  secure: false,
   auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
+    user: process.env.MAIL_USER?.trim(),
+    pass: process.env.MAIL_PASS?.trim().replace(/\s/g, ""),
   },
 });
 

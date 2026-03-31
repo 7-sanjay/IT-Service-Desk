@@ -13,4 +13,17 @@ api.interceptors.request.use((req) => {
   return req;
 });
 
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (
+      err.response?.status === 403 &&
+      err.response?.data?.code === "MUST_CHANGE_PASSWORD"
+    ) {
+      window.location.hash = "#/ticketing/change-password";
+    }
+    return Promise.reject(err);
+  }
+);
+
 export default api;

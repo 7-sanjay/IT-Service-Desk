@@ -39,6 +39,7 @@ import {
   escalateRequest,
 } from "../../api/requestApi";
 import { Routes } from "../../routes";
+import { businessMsBetweenIst, formatMsShort, isWithinBusinessHoursIst } from "../../utils/slaTime";
 
 export default () => {
   const [listRequest, setListRequest] = useState([]);
@@ -48,14 +49,68 @@ export default () => {
   const [isPending, setIsPending] = useState(false);
   const history = useHistory();
 
-  const getSlaTimer = (dueAt, completedAt) => {
-    if (!dueAt) return { text: "-", color: "secondary" };
+  const getSlaTimer = (request, kind) => {
+    const now = new Date();
+    const inBusiness = isWithinBusinessHoursIst(now);
+    const pauseReason = request?.sla_pause?.reason;
+    const pausedByChat = pauseReason === "waiting_for_user";
+
+    if (kind === "response") {
+      const targetMs = request?.response_target_ms;
+      const completedAt = request?.respondedAt;
+      const dueAt = request?.responseDueAt;
+      if (!targetMs && !dueAt) return { text: "-", color: "secondary" };
+      if (completedAt) return { text: "Completed", color: "success" };
+      if (targetMs && request.createdAt) {
+        const elapsed = businessMsBetweenIst(request.createdAt, now);
+        const remaining = targetMs - elapsed;
+        if (remaining <= 0) return { text: `Breached by ${formatMsShort(-remaining)}`, color: "danger" };
+        if (!inBusiness) return { text: `Paused (${formatMsShort(remaining)} left)`, color: "secondary" };
+        if (Math.floor(remaining / 60000) <= 30) return { text: `${formatMsShort(remaining)} left`, color: "warning" };
+        return { text: `${formatMsShort(remaining)} left`, color: "success" };
+      }
+      // Fallback: old behaviour using dueAt (wall-clock)
+      const diffMs = new Date(dueAt).getTime() - now.getTime();
+      const totalMin = Math.floor(Math.abs(diffMs) / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      if (diffMs < 0) return { text: `Breached by ${h}h ${m}m`, color: "danger" };
+      if (!inBusiness) return { text: `Paused (${h}h ${m}m left)`, color: "secondary" };
+      if (totalMin <= 30) return { text: `${h}h ${m}m left`, color: "warning" };
+      return { text: `${h}h ${m}m left`, color: "success" };
+    }
+
+    // resolution
+    const targetMs = request?.resolution_target_ms;
+    const completedAt = request?.resolvedAt;
+    const dueAt = request?.resolutionDueAt;
+    if (!targetMs && !dueAt) return { text: "-", color: "secondary" };
     if (completedAt) return { text: "Completed", color: "success" };
-    const diffMs = new Date(dueAt).getTime() - Date.now();
+
+    if (targetMs) {
+      const accumulated = request?.accumulated_time_ms || 0;
+      const running =
+        request?.ticket_status === "P" && request?.start_process_ticket && !pausedByChat;
+      const current = running
+        ? businessMsBetweenIst(request.start_process_ticket, now)
+        : 0;
+      const elapsed = accumulated + current;
+      const remaining = targetMs - elapsed;
+
+      const isPaused = pausedByChat || !inBusiness || !running;
+      if (remaining <= 0) return { text: `Breached by ${formatMsShort(-remaining)}`, color: "danger" };
+      if (isPaused) return { text: `Paused (${formatMsShort(remaining)} left)`, color: "secondary" };
+      if (Math.floor(remaining / 60000) <= 30) return { text: `${formatMsShort(remaining)} left`, color: "warning" };
+      return { text: `${formatMsShort(remaining)} left`, color: "success" };
+    }
+
+    // Fallback for legacy tickets: dueAt-based, wall-clock
+    const diffMs = new Date(dueAt).getTime() - now.getTime();
     const totalMin = Math.floor(Math.abs(diffMs) / 60000);
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
     if (diffMs < 0) return { text: `Breached by ${h}h ${m}m`, color: "danger" };
+    if (!inBusiness) return { text: `Paused (${h}h ${m}m left)`, color: "secondary" };
     if (totalMin <= 30) return { text: `${h}h ${m}m left`, color: "warning" };
     return { text: `${h}h ${m}m left`, color: "success" };
   };
@@ -220,8 +275,8 @@ export default () => {
 
     const requestDetail =
       request.requests_detail || request.detail || { title_request: "" };
-    const responseTimer = getSlaTimer(request.responseDueAt, request.respondedAt);
-    const resolutionTimer = getSlaTimer(request.resolutionDueAt, request.resolvedAt);
+    const responseTimer = getSlaTimer(request, "response");
+    const resolutionTimer = getSlaTimer(request, "resolution");
 
     return (
       <>

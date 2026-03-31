@@ -7,6 +7,43 @@ const isSupportEngineer = (level) =>
   level === "support_engineer" || level === "team";
 const isManager = (level) => level === "manager" || level === "head";
 
+// SLA timer uses business hours in IST (08:00–22:00). IST is fixed UTC+05:30 (no DST).
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+const businessMsBetweenIst = (start, end) => {
+  if (!start || !end) return 0;
+  const s0 = new Date(start).getTime();
+  const e0 = new Date(end).getTime();
+  if (!Number.isFinite(s0) || !Number.isFinite(e0)) return 0;
+  if (e0 <= s0) return 0;
+
+  // Shift epoch by IST offset so "local day" aligns to UTC day boundaries.
+  const s = s0 + IST_OFFSET_MS;
+  const e = e0 + IST_OFFSET_MS;
+
+  let total = 0;
+  let dayStart = Math.floor(s / DAY_MS) * DAY_MS;
+  while (dayStart < e) {
+    const businessStart = dayStart + 8 * HOUR_MS;
+    const businessEnd = dayStart + 22 * HOUR_MS;
+    const overlapStart = Math.max(s, businessStart);
+    const overlapEnd = Math.min(e, businessEnd);
+    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+    dayStart += DAY_MS;
+  }
+  return total;
+};
+
+const computeResolutionElapsedBusinessMs = (request, now = new Date()) => {
+  const accumulated = request?.accumulated_time_ms || 0;
+  if (request?.start_process_ticket && request?.ticket_status === "P") {
+    return accumulated + businessMsBetweenIst(request.start_process_ticket, now);
+  }
+  return accumulated;
+};
+
 // Department filter for team/head: only tickets from their assigned department. Ticket "Human Resources (HR)" matches user department "HR".
 const getDepartmentFilter = (decoded) => {
   if (!isSupportEngineer(decoded.level) && !isManager(decoded.level)) return {};
@@ -212,12 +249,11 @@ const createRequest = async (req, res) => {
 
     const now = new Date();
     const slaRule = await getSlaForPriority(db, priority);
-    const responseDueAt = slaRule
-      ? new Date(now.getTime() + slaRule.responseTime * 60 * 1000)
-      : null;
-    const resolutionDueAt = slaRule
-      ? new Date(now.getTime() + slaRule.resolutionTime * 60 * 1000)
-      : null;
+    const responseTargetMs = slaRule ? slaRule.responseTime * 60 * 1000 : null;
+    const resolutionTargetMs = slaRule ? slaRule.resolutionTime * 60 * 1000 : null;
+    // Keep dueAt for existing UI, but SLA calculations should use business-time targets.
+    const responseDueAt = responseTargetMs ? new Date(now.getTime() + responseTargetMs) : null;
+    const resolutionDueAt = resolutionTargetMs ? new Date(now.getTime() + resolutionTargetMs) : null;
     const insertResult = await requestsCollection.insertOne({
       id_user: req.decoded.id,
       user_request: req.decoded.username,
@@ -233,10 +269,13 @@ const createRequest = async (req, res) => {
       accumulated_time_ms: 0, // Track accumulated time when ticket is paused/resumed
       responseDueAt,
       resolutionDueAt,
+      response_target_ms: responseTargetMs,
+      resolution_target_ms: resolutionTargetMs,
       respondedAt: null,
       resolvedAt: null,
       responseSLA: null,
       resolutionSLA: null,
+      sla_pause: null,
       escalated: false,
       createdAt: now,
       updatedAt: now,
@@ -832,7 +871,11 @@ const approveRequestTeam = async (req, res) => {
 
     if (!request.respondedAt) {
       updateData.respondedAt = now;
-      if (request.responseDueAt) {
+      const targetMs = request.response_target_ms;
+      if (typeof targetMs === "number" && targetMs > 0 && request.createdAt) {
+        const elapsed = businessMsBetweenIst(request.createdAt, now);
+        updateData.responseSLA = elapsed <= targetMs ? "Met" : "Breached";
+      } else if (request.responseDueAt) {
         updateData.responseSLA =
           now.getTime() <= new Date(request.responseDueAt).getTime()
             ? "Met"
@@ -939,22 +982,55 @@ const reply_request = async (req, res) => {
       });
     }
 
+    const now = new Date();
+    const isTeamSender = isSupportEngineer(req.decoded.level) || isManager(req.decoded.level);
+    const isUserSender = req.decoded.level === "user";
+
     const replyDoc = {
       message: message_reply,
       user_reply: req.decoded.fullname || req.decoded.username,
-      createdAt: new Date(),
+      createdAt: now,
       file_document: req.file
         ? url + "/public/files/" + req.file.filename
         : null,
     };
 
+    const updateOps = {
+      $push: { replies: replyDoc },
+      $set: { updatedAt: now },
+    };
+
+    // SLA pause/resume based on chat:
+    // - When team sends a message, pause SLA (waiting for user) without resetting accumulated time.
+    // - When user replies back, resume SLA from where it stopped.
+    if (request.ticket_status === "P") {
+      const pause = request.sla_pause || null;
+
+      if (isTeamSender) {
+        // First team message initiates waiting-for-user pause.
+        if (!pause || pause.reason !== "waiting_for_user") {
+          // Accumulate business time up to now, then pause
+          if (request.start_process_ticket) {
+            const elapsed = businessMsBetweenIst(request.start_process_ticket, now);
+            updateOps.$set.accumulated_time_ms = (request.accumulated_time_ms || 0) + elapsed;
+            updateOps.$set.start_process_ticket = null;
+          }
+          updateOps.$set.sla_pause = { reason: "waiting_for_user", startedAt: now };
+        }
+      } else if (isUserSender) {
+        // User reply resumes if we were waiting for user.
+        if (pause && pause.reason === "waiting_for_user" && pause.startedAt) {
+          updateOps.$set.sla_pause = null;
+          if (!request.start_process_ticket) {
+            updateOps.$set.start_process_ticket = now;
+          }
+        }
+      }
+    }
+
     const updateResult = await requestsCollection.updateOne(
       { _id: new ObjectId(id) },
-      {
-        $push: {
-          replies: replyDoc,
-        },
-      }
+      updateOps
     );
 
     const findRequest = await requestsCollection.findOne(
@@ -1032,21 +1108,32 @@ const requestDone = async (req, res) => {
 
     // Calculate accumulated time if ticket was previously in progress
     if (request.start_process_ticket && request.ticket_status === "P") {
-      const elapsedMs = now.getTime() - new Date(request.start_process_ticket).getTime();
+      const elapsedMs = businessMsBetweenIst(request.start_process_ticket, now);
       const currentAccumulated = request.accumulated_time_ms || 0;
       updateData.accumulated_time_ms = currentAccumulated + elapsedMs;
       // Reset start_process_ticket to null since timer is paused
       updateData.start_process_ticket = null;
     }
 
-    if (request.resolutionDueAt) {
-      const breached = now.getTime() > new Date(request.resolutionDueAt).getTime();
+    // Resolution SLA: compare elapsed BUSINESS time (08:00–22:00 IST) against SLA target.
+    const elapsedBusinessMs = computeResolutionElapsedBusinessMs(
+      { ...request, ...updateData },
+      now
+    );
+    const targetMs = request.resolution_target_ms;
+    if (typeof targetMs === "number" && targetMs > 0) {
+      const breached = elapsedBusinessMs > targetMs;
       updateData.resolutionSLA = breached ? "Breached" : "Met";
-      if (breached) {
-        updateData.escalated = true;
-      }
+      if (breached) updateData.escalated = true;
     } else {
-      updateData.resolutionSLA = "Met";
+      // Backward compatibility: fall back to legacy dueAt if present
+      if (request.resolutionDueAt) {
+        const breached = now.getTime() > new Date(request.resolutionDueAt).getTime();
+        updateData.resolutionSLA = breached ? "Breached" : "Met";
+        if (breached) updateData.escalated = true;
+      } else {
+        updateData.resolutionSLA = "Met";
+      }
     }
 
     const updateStatus = await requestsCollection.updateOne(
@@ -1261,10 +1348,14 @@ const escalateRequest = async (req, res) => {
 
     // Pause timer when escalating - accumulate time and reset start_process_ticket
     if (request.start_process_ticket) {
-      const elapsedMs = now.getTime() - new Date(request.start_process_ticket).getTime();
+      const elapsedMs = businessMsBetweenIst(request.start_process_ticket, now);
       const currentAccumulated = request.accumulated_time_ms || 0;
       updateData.accumulated_time_ms = currentAccumulated + elapsedMs;
       updateData.start_process_ticket = null; // Pause timer
+    }
+    // If ticket is already paused for user chat, keep that info; otherwise mark as paused by escalation
+    if (!request.sla_pause) {
+      updateData.sla_pause = { reason: "escalated", startedAt: now };
     }
 
     const updateStatus = await requestsCollection.updateOne(

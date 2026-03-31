@@ -33,6 +33,18 @@ export default () => {
 
   useEffect(() => {
     if (token && !isExpired) {
+      try {
+        const part = token.split(".")[1];
+        const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+        const payload = JSON.parse(atob(padded));
+        if (payload.mustChangePassword) {
+          history.push(Routes.ChangePassword.path);
+          return;
+        }
+      } catch (e) {
+        /* ignore */
+      }
       history.push(Routes.DashboardOverview.path);
     }
   }, [history, isExpired, token]);
@@ -51,7 +63,11 @@ export default () => {
       localStorage.setItem("email", data.data.email);
       setIsPending(false);
       toast.success("Login Success!");
-      history.push(Routes.DashboardOverview.path);
+      if (data.data.mustChangePassword) {
+        history.push(Routes.ChangePassword.path);
+      } else {
+        history.push(Routes.DashboardOverview.path);
+      }
     } catch (error) {
       setIsPending(false);
       setError(true);

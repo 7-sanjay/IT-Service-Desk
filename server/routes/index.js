@@ -8,6 +8,7 @@ const {
   getLevelTeamCount,
   getAllUserAdmin,
   createUser,
+  changeOwnPassword,
   deleteUserById,
   updateUser,
   searchUser,
@@ -104,6 +105,7 @@ router.get("/heads", isAdmin, getAllUserHead);
 router.get("/users", isAdmin, getAllUsers);
 router.get("/employees", isAdmin, getEmployee);
 router.post("/user", isAdmin, createUser);
+router.put("/user/me/password", isAuth, changeOwnPassword);
 router.get("/users-count", isAuth, getLevelUserCount);
 router.get("/teams-count", isAuth, getLevelTeamCount);
 router.get("/teams", isAuth, getAllUserWithUsernameTeam);

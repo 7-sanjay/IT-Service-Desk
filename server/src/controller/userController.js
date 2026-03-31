@@ -1,7 +1,9 @@
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { ObjectId } = require("mongodb");
 const { getDb } = require("../../config/mongo");
+const transporter = require("../../utils/nodemailer");
 
 const normalizeLevel = (level) => {
   if (level === "team") return "support_engineer";
@@ -25,7 +27,20 @@ const createToken = (user) => {
   if (isSupportEngineer(normalizedLevel) || isManager(normalizedLevel)) {
     payload.department = user.department || null;
   }
+  if (user.mustChangePassword) {
+    payload.mustChangePassword = true;
+  }
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1d" });
+};
+
+const generateRandomPassword = () => {
+  const chars =
+    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+  let pwd = "";
+  for (let i = 0; i < 14; i++) {
+    pwd += chars[crypto.randomInt(0, chars.length)];
+  }
+  return pwd;
 };
 
 // const loginAdmin = async (req, res) => {
@@ -101,13 +116,16 @@ const loginUser = async (req, res) => {
       });
     }
 
-    const token = await createToken({
+    const mustChangePassword = Boolean(user.mustChangePassword);
+
+    const token = createToken({
       id: user._id.toString(),
       username: user.username,
       full_name: user.full_name,
       email: user.email,
       level: normalizeLevel(user.level),
       department: user.department,
+      mustChangePassword,
     });
 
     if (user.level !== normalizeLevel(user.level)) {
@@ -126,6 +144,7 @@ const loginUser = async (req, res) => {
         level: normalizeLevel(user.level),
         email: user.email,
         token: token,
+        mustChangePassword,
       },
     });
   } catch (err) {
@@ -250,17 +269,17 @@ const getAllUserHead = async (req, res) => {
 const DEPARTMENTS = ["IT", "HR", "Finance", "Sales"];
 
 const createUser = async (req, res) => {
-  const { id_karyawan, full_name, username, email, level, password, department } = req.body;
+  const { id_karyawan, full_name, username, email, level, department } = req.body;
   const normalizedLevel = normalizeLevel(level);
 
   try {
     const db = getDb();
     const usersCollection = db.collection("users");
 
-    if (!password) {
+    if (!email || typeof email !== "string" || !email.trim()) {
       return res.status(400).json({
         status: "failed",
-        message: "Password is required",
+        message: "A valid email is required so the temporary password can be sent.",
       });
     }
 
@@ -275,15 +294,17 @@ const createUser = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const plainPassword = generateRandomPassword();
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
     const newUser = {
       id_karyawan: id_karyawan || username,
       full_name,
       username,
-      email,
+      email: email.trim(),
       level: normalizedLevel,
       password: hashedPassword,
+      mustChangePassword: true,
       department:
         isSupportEngineer(normalizedLevel) || isManager(normalizedLevel)
           ? department
@@ -294,10 +315,51 @@ const createUser = async (req, res) => {
 
     const result = await usersCollection.insertOne(newUser);
 
+    const appUrl =
+      process.env.APP_PUBLIC_URL || process.env.CLIENT_URL || "http://localhost:3000";
+    const mailOptions = {
+      from: `"Service Desk" <${process.env.MAIL_USER}>`,
+      to: newUser.email,
+      subject: "Your Service Desk account",
+      html: `
+        <p>Hello ${full_name || username},</p>
+        <p>An administrator created an account for you on the Service Desk system.</p>
+        <p><strong>Username / Employee ID:</strong> ${username}</p>
+        <p><strong>Temporary password:</strong> ${plainPassword}</p>
+        <p>Sign in with this password, then you will be asked to choose a new password.</p>
+        <p>If you did not expect this email, contact your administrator.</p>
+      `,
+    };
+
+    let emailSent = true;
+    try {
+      await transporter.sendMail(mailOptions);
+    } catch (mailErr) {
+      console.error("createUser sendMail error:", mailErr.message);
+      emailSent = false;
+    }
+
+    const safeData = {
+      _id: result.insertedId,
+      id_karyawan: newUser.id_karyawan,
+      full_name: newUser.full_name,
+      username: newUser.username,
+      email: newUser.email,
+      level: newUser.level,
+      department: newUser.department,
+      mustChangePassword: true,
+      createdAt: newUser.createdAt,
+      updatedAt: newUser.updatedAt,
+      emailSent,
+      ...(emailSent ? {} : { temporaryPassword: plainPassword }),
+    };
+
     res.status(200).json({
       status: "success",
-      message: "Successfully create new user!",
-      data: { _id: result.insertedId, ...newUser },
+      message: emailSent
+        ? "User created. A temporary password was sent to their email."
+        : "User created, but the welcome email could not be sent. Share the temporary password with the user manually and check SMTP settings (MAIL_USER / MAIL_PASS).",
+      data: safeData,
     });
   } catch (err) {
     console.error("Mongo createUser error:", err.message);
@@ -362,6 +424,7 @@ const updateUser = async (req, res) => {
 
     if (password) {
       updateDoc.password = await bcrypt.hash(password, 10);
+      updateDoc.mustChangePassword = false;
     }
 
     const result = await usersCollection.updateOne(
@@ -501,6 +564,87 @@ const searchUser = async (req, res) => {
   }
 };
 
+const changeOwnPassword = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const userId = req.decoded.id;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({
+      status: "failed",
+      message: "Current password and new password are required.",
+    });
+  }
+
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    return res.status(400).json({
+      status: "failed",
+      message: "New password must be at least 8 characters.",
+    });
+  }
+
+  try {
+    const db = getDb();
+    const usersCollection = db.collection("users");
+    const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+
+    if (!user || !user.password) {
+      return res.status(400).json({
+        status: "failed",
+        message: "User not found.",
+      });
+    }
+
+    let isMatch = false;
+    if (typeof user.password === "string" && user.password.startsWith("$2")) {
+      isMatch = await bcrypt.compare(currentPassword, user.password);
+    } else {
+      isMatch = user.password === currentPassword;
+    }
+
+    if (!isMatch) {
+      return res.status(400).json({
+        status: "failed",
+        message: "Current password is incorrect.",
+      });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await usersCollection.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          password: hashed,
+          mustChangePassword: false,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    const normalizedLevel = normalizeLevel(user.level);
+    const token = createToken({
+      id: user._id.toString(),
+      username: user.username,
+      full_name: user.full_name,
+      email: user.email,
+      level: normalizedLevel,
+      department: user.department,
+      mustChangePassword: false,
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Password updated successfully.",
+      data: { token },
+    });
+  } catch (err) {
+    console.error("Mongo changeOwnPassword error:", err.message);
+    return res.status(500).json({
+      status: "failed",
+      message: "Something went wrong!",
+    });
+  }
+};
+
 const getEmployee = async (req, res) => {
   try {
     const db = getDb();
@@ -541,6 +685,7 @@ module.exports = {
   getAllUserAdmin,
   getAllUserHead,
   createUser,
+  changeOwnPassword,
   deleteUserById,
   updateUser,
   // searchUserAdmin,
