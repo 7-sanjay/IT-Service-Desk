@@ -44,6 +44,30 @@ const computeResolutionElapsedBusinessMs = (request, now = new Date()) => {
   return accumulated;
 };
 
+/** Query ?range=3d|7d|30d — window length for period-over-period % change on KPIs */
+const getDashboardRangeWindow = (req) => {
+  const raw = String(req.query.range || "30d").toLowerCase();
+  const map = { "3d": 3 * DAY_MS, "7d": 7 * DAY_MS, "30d": 30 * DAY_MS };
+  const windowMs = map[raw] || map["30d"];
+  const now = Date.now();
+  return {
+    rangeKey: raw in map ? raw : "30d",
+    windowMs,
+    now: new Date(now),
+    currentStart: new Date(now - windowMs),
+    previousStart: new Date(now - 2 * windowMs),
+    previousEnd: new Date(now - windowMs),
+  };
+};
+
+const percentChange = (current, previous) => {
+  const c = Number(current);
+  const p = Number(previous);
+  if (!Number.isFinite(c) || !Number.isFinite(p)) return 0;
+  if (p === 0) return c === 0 ? 0 : 100;
+  return Math.round(((c - p) / p) * 1000) / 10;
+};
+
 // Department filter for team/head: only tickets from their assigned department. Ticket "Human Resources (HR)" matches user department "HR".
 const getDepartmentFilter = (decoded) => {
   if (!isSupportEngineer(decoded.level) && !isManager(decoded.level)) return {};
@@ -1540,6 +1564,18 @@ const getRequestAiHelp = async (req, res) => {
       });
     }
 
+    // AI Help is only for Incident tickets (type "I"), not Request ("P")
+    const typeRaw = request.type;
+    const isIncident =
+      typeRaw === "I" ||
+      (typeof typeRaw === "string" && typeRaw.toLowerCase() === "incident");
+    if (!isIncident) {
+      return res.status(400).json({
+        status: "failed",
+        message: "AI Help is only available for Incident tickets.",
+      });
+    }
+
     // For user role, ensure the request belongs to the current user
     if (req.decoded.level === "user" && String(request.id_user) !== String(req.decoded.id)) {
       return res.status(403).json({
@@ -1569,7 +1605,7 @@ const getRequestAiHelp = async (req, res) => {
     const modelIds = process.env.GEMINI_MODEL
       ? [process.env.GEMINI_MODEL]
       : freeTierModels;
-    const prompt = `Analyse the IT service desk ticket, identify the issue category, and generate concise, prioritized troubleshooting steps starting with the most probable cause; limit to 6 to 8 numbered steps, no bold text and no extra explanation.
+    const prompt = `Analyse the IT service desk ticket, identify the issue category, and generate concise, prioritized troubleshooting steps starting with the most probable cause;limit to 6 to 8 numbered steps, no bold text and no extra explanation.
 
 Description: ${description}`;
 
@@ -1685,14 +1721,72 @@ const getUserDashboardStats = async (req, res) => {
       }
     });
 
+    const { rangeKey, currentStart, previousStart, previousEnd, now } = getDashboardRangeWindow(req);
+    const closedOrResolvedInWindow = (from, to) => ({
+      ...userFilter,
+      ticket_status: "C",
+      $or: [
+        { resolvedAt: { $gte: from, $lt: to } },
+        { end_date_ticket: { $gte: from, $lt: to } },
+      ],
+    });
+
+    const [
+      createdCurr,
+      createdPrev,
+      openPipelineCurr,
+      openPipelinePrev,
+      closedCurr,
+      closedPrev,
+      pendingCurr,
+      pendingPrev,
+    ] = await Promise.all([
+      requestsCollection.countDocuments({ ...userFilter, createdAt: { $gte: currentStart } }),
+      requestsCollection.countDocuments({
+        ...userFilter,
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ...userFilter,
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...userFilter,
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments(closedOrResolvedInWindow(currentStart, now)),
+      requestsCollection.countDocuments(closedOrResolvedInWindow(previousStart, previousEnd)),
+      requestsCollection.countDocuments({
+        ...userFilter,
+        ticket_status: "W",
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...userFilter,
+        ticket_status: "W",
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+    ]);
+
+    const changes = {
+      totalTickets: percentChange(createdCurr, createdPrev),
+      openTickets: percentChange(openPipelineCurr, openPipelinePrev),
+      closedTickets: percentChange(closedCurr, closedPrev),
+      pendingApproval: percentChange(pendingCurr, pendingPrev),
+    };
+
     res.status(200).json({
       status: "success",
       message: "User dashboard stats loaded.",
       data: {
+        range: rangeKey,
         totalTickets,
         openTickets,
         closedTickets,
         pendingApproval,
+        changes,
         timeline: {
           requested,
           assigned,
@@ -1729,6 +1823,38 @@ const computeAvgResolutionMinutes = async (requestsCollection, matchFilter) => {
   return Math.round(avgMs / (1000 * 60)); // minutes
 };
 
+/** Avg resolution (minutes) for tickets closed with end_date_ticket or resolvedAt in [from, to) */
+const computeAvgResolutionMinutesInWindow = async (
+  requestsCollection,
+  matchFilter,
+  from,
+  to
+) => {
+  const pipeline = [
+    {
+      $match: {
+        ticket_status: "C",
+        ...matchFilter,
+        $or: [
+          { end_date_ticket: { $gte: from, $lt: to } },
+          { resolvedAt: { $gte: from, $lt: to } },
+        ],
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalMs: { $sum: { $ifNull: ["$accumulated_time_ms", 0] } },
+        count: { $sum: 1 },
+      },
+    },
+  ];
+  const result = await requestsCollection.aggregate(pipeline).toArray();
+  if (!result.length || result[0].count === 0) return 0;
+  const avgMs = result[0].totalMs / result[0].count;
+  return Math.round(avgMs / (1000 * 60));
+};
+
 // Team dashboard stats (for logged-in team member)
 const getTeamDashboardStats = async (req, res) => {
   try {
@@ -1763,14 +1889,71 @@ const getTeamDashboardStats = async (req, res) => {
         computeAvgResolutionMinutes(requestsCollection, baseFilter),
       ]);
 
+    const { rangeKey, currentStart, previousStart, previousEnd, now } = getDashboardRangeWindow(req);
+    const closedOrResolvedInWindowTeam = (from, to) => ({
+      ...baseFilter,
+      ticket_status: "C",
+      $or: [
+        { resolvedAt: { $gte: from, $lt: to } },
+        { end_date_ticket: { $gte: from, $lt: to } },
+      ],
+    });
+
+    const [
+      activeCurr,
+      activePrev,
+      hpCurr,
+      hpPrev,
+      closedCurr,
+      closedPrev,
+      avgCurrWin,
+      avgPrevWin,
+    ] = await Promise.all([
+      requestsCollection.countDocuments({
+        ...baseFilter,
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...baseFilter,
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ...baseFilter,
+        priority: { $in: ["High", "high", "Critical", "critical"] },
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...baseFilter,
+        priority: { $in: ["High", "high", "Critical", "critical"] },
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments(closedOrResolvedInWindowTeam(currentStart, now)),
+      requestsCollection.countDocuments(closedOrResolvedInWindowTeam(previousStart, previousEnd)),
+      computeAvgResolutionMinutesInWindow(requestsCollection, baseFilter, currentStart, now),
+      computeAvgResolutionMinutesInWindow(requestsCollection, baseFilter, previousStart, previousEnd),
+    ]);
+
+    const changes = {
+      ticketsAssigned: percentChange(activeCurr, activePrev),
+      highPriorityTickets: percentChange(hpCurr, hpPrev),
+      ticketsClosed: percentChange(closedCurr, closedPrev),
+      avgResolutionMinutes: percentChange(avgCurrWin, avgPrevWin),
+    };
+
     res.status(200).json({
       status: "success",
       message: "Team dashboard stats loaded.",
       data: {
+        range: rangeKey,
         ticketsAssigned,
         highPriorityTickets,
         ticketsClosed,
         avgResolutionMinutes,
+        changes,
       },
     });
   } catch (err) {
@@ -1846,10 +2029,113 @@ const getHeadDashboardStats = async (req, res) => {
       free = teamNames.length - inWork;
     }
 
+    const { rangeKey, currentStart, previousStart, previousEnd, now } = getDashboardRangeWindow(req);
+    const closedOrResolvedHead = (from, to) => ({
+      ...deptFilter,
+      ticket_status: "C",
+      $or: [
+        { resolvedAt: { $gte: from, $lt: to } },
+        { end_date_ticket: { $gte: from, $lt: to } },
+      ],
+    });
+
+    const [
+      volCurr,
+      volPrev,
+      openPipeCurr,
+      openPipePrev,
+      closedInCurr,
+      closedInPrev,
+      pendCurr,
+      pendPrev,
+      assignCurr,
+      assignPrev,
+      escCurr,
+      escPrev,
+      avgCurrWin,
+      avgPrevWin,
+      pDeptCurr,
+      pDeptPrev,
+    ] = await Promise.all([
+      requestsCollection.countDocuments({ ...deptFilter, createdAt: { $gte: currentStart } }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments(closedOrResolvedHead(currentStart, now)),
+      requestsCollection.countDocuments(closedOrResolvedHead(previousStart, previousEnd)),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: "W",
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: "W",
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        user_process: { $ne: null },
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        user_process: { $ne: null },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: "E",
+        updatedAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: "E",
+        updatedAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      computeAvgResolutionMinutesInWindow(requestsCollection, deptFilter, currentStart, now),
+      computeAvgResolutionMinutesInWindow(requestsCollection, deptFilter, previousStart, previousEnd),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: "P",
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ...deptFilter,
+        ticket_status: "P",
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+    ]);
+
+    const changes = {
+      totalDeptTickets: percentChange(volCurr, volPrev),
+      openTickets: percentChange(openPipeCurr, openPipePrev),
+      closedTickets: percentChange(closedInCurr, closedInPrev),
+      avgResolutionMinutes: percentChange(avgCurrWin, avgPrevWin),
+      pendingApproval: percentChange(pendCurr, pendPrev),
+      ticketsAssigned: percentChange(assignCurr, assignPrev),
+      ticketsResolved: percentChange(closedInCurr, closedInPrev),
+      escalatedTickets: percentChange(escCurr, escPrev),
+      inWork: percentChange(pDeptCurr, pDeptPrev),
+      free: percentChange(openPipeCurr, openPipePrev),
+    };
+
     res.status(200).json({
       status: "success",
       message: "Head dashboard stats loaded.",
       data: {
+        range: rangeKey,
         totalDeptTickets,
         openTickets,
         closedTickets,
@@ -1860,6 +2146,7 @@ const getHeadDashboardStats = async (req, res) => {
         escalatedTickets,
         inWork,
         free,
+        changes,
       },
     });
   } catch (err) {
@@ -1954,10 +2241,115 @@ const getAdminDashboardStats = async (req, res) => {
     // For now, treat all users as active
     const activeUsers = totalUsers;
 
+    const { rangeKey, currentStart, previousStart, previousEnd, now } = getDashboardRangeWindow(req);
+    const closedGlobalWindow = (from, to) => ({
+      ticket_status: "C",
+      $or: [
+        { resolvedAt: { $gte: from, $lt: to } },
+        { end_date_ticket: { $gte: from, $lt: to } },
+      ],
+    });
+
+    const [
+      volCurr,
+      volPrev,
+      openPipeCurr,
+      openPipePrev,
+      progCurr,
+      progPrev,
+      closedInCurr,
+      closedInPrev,
+      aiClosedCurr,
+      aiClosedPrev,
+      userCurr,
+      userPrev,
+      techCurr,
+      techPrev,
+      headCurr,
+      headPrev,
+    ] = await Promise.all([
+      requestsCollection.countDocuments({ createdAt: { $gte: currentStart } }),
+      requestsCollection.countDocuments({
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ticket_status: { $nin: ["C", "R"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments({
+        ticket_status: "P",
+        createdAt: { $gte: currentStart },
+      }),
+      requestsCollection.countDocuments({
+        ticket_status: "P",
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      requestsCollection.countDocuments(closedGlobalWindow(currentStart, now)),
+      requestsCollection.countDocuments(closedGlobalWindow(previousStart, previousEnd)),
+      requestsCollection.countDocuments({
+        ticket_status: "C",
+        closed_by_ai: true,
+        $or: [
+          { resolvedAt: { $gte: currentStart, $lt: now } },
+          { end_date_ticket: { $gte: currentStart, $lt: now } },
+        ],
+      }),
+      requestsCollection.countDocuments({
+        ticket_status: "C",
+        closed_by_ai: true,
+        $or: [
+          { resolvedAt: { $gte: previousStart, $lt: previousEnd } },
+          { end_date_ticket: { $gte: previousStart, $lt: previousEnd } },
+        ],
+      }),
+      usersCollection.countDocuments({ createdAt: { $gte: currentStart } }),
+      usersCollection.countDocuments({
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      usersCollection.countDocuments({
+        level: { $in: ["support_engineer", "team"] },
+        createdAt: { $gte: currentStart },
+      }),
+      usersCollection.countDocuments({
+        level: { $in: ["support_engineer", "team"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+      usersCollection.countDocuments({
+        level: { $in: ["manager", "head"] },
+        createdAt: { $gte: currentStart },
+      }),
+      usersCollection.countDocuments({
+        level: { $in: ["manager", "head"] },
+        createdAt: { $gte: previousStart, $lt: previousEnd },
+      }),
+    ]);
+
+    const aiRateCurr =
+      closedInCurr > 0 ? Math.round((aiClosedCurr / closedInCurr) * 100) : 0;
+    const aiRatePrev =
+      closedInPrev > 0 ? Math.round((aiClosedPrev / closedInPrev) * 100) : 0;
+
+    const changes = {
+      totalTickets: percentChange(volCurr, volPrev),
+      openTickets: percentChange(openPipeCurr, openPipePrev),
+      inProgressTickets: percentChange(progCurr, progPrev),
+      closedTickets: percentChange(closedInCurr, closedInPrev),
+      totalUsers: percentChange(userCurr, userPrev),
+      totalTechnicians: percentChange(techCurr, techPrev),
+      departmentHeads: percentChange(headCurr, headPrev),
+      aiResolvedTickets: percentChange(aiClosedCurr, aiClosedPrev),
+      aiSuccessRate: percentChange(aiRateCurr, aiRatePrev),
+    };
+
     res.status(200).json({
       status: "success",
       message: "Admin dashboard stats loaded.",
       data: {
+        range: rangeKey,
         ticketAnalytics: {
           totalTickets,
           openTickets,
@@ -1976,6 +2368,7 @@ const getAdminDashboardStats = async (req, res) => {
           totalTechnicians: totalTeams,
           departmentHeads: totalHeads,
         },
+        changes,
       },
     });
   } catch (err) {

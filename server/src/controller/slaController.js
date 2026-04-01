@@ -2,6 +2,32 @@ const { ObjectId } = require("mongodb");
 const { getDb } = require("../../config/mongo");
 
 const ALLOWED_PRIORITIES = ["Low", "Medium", "High"];
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+const businessMsBetweenIst = (start, end) => {
+  if (!start || !end) return 0;
+  const s0 = new Date(start).getTime();
+  const e0 = new Date(end).getTime();
+  if (!Number.isFinite(s0) || !Number.isFinite(e0)) return 0;
+  if (e0 <= s0) return 0;
+
+  const s = s0 + IST_OFFSET_MS;
+  const e = e0 + IST_OFFSET_MS;
+
+  let total = 0;
+  let dayStart = Math.floor(s / DAY_MS) * DAY_MS;
+  while (dayStart < e) {
+    const businessStart = dayStart + 8 * HOUR_MS;
+    const businessEnd = dayStart + 22 * HOUR_MS;
+    const overlapStart = Math.max(s, businessStart);
+    const overlapEnd = Math.min(e, businessEnd);
+    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+    dayStart += DAY_MS;
+  }
+  return total;
+};
 
 const normalizePriority = (priority) => {
   if (!priority) return "";
@@ -147,6 +173,61 @@ const getSlaStatus = async (req, res) => {
     const metPct = totalTickets ? Math.round((metCount / totalTickets) * 100) : 0;
     const breachedPct = totalTickets ? Math.round((breachedCount / totalTickets) * 100) : 0;
 
+    const priorityAcc = {
+      Low: { responseTotalMs: 0, responseCount: 0, resolutionTotalMs: 0, resolutionCount: 0 },
+      Medium: { responseTotalMs: 0, responseCount: 0, resolutionTotalMs: 0, resolutionCount: 0 },
+      High: { responseTotalMs: 0, responseCount: 0, resolutionTotalMs: 0, resolutionCount: 0 },
+    };
+
+    for (const t of tickets) {
+      const p = normalizePriority(t.priority);
+      if (!priorityAcc[p]) continue;
+
+      // Response average:
+      // Prefer explicit respondedAt, then fall back to legacy first processing timestamp.
+      const responseAt = t.respondedAt || t.start_process_ticket || null;
+      if (t.createdAt && responseAt) {
+        const responseMs = businessMsBetweenIst(t.createdAt, responseAt);
+        if (responseMs > 0) {
+          priorityAcc[p].responseTotalMs += responseMs;
+          priorityAcc[p].responseCount += 1;
+        }
+      }
+
+      // Resolution average:
+      // Prefer explicit resolvedAt, then fallback to legacy end_date_ticket.
+      const resolvedAt = t.resolvedAt || t.end_date_ticket || null;
+      if (resolvedAt) {
+        let resolutionMs = 0;
+        if (typeof t.accumulated_time_ms === "number" && t.accumulated_time_ms > 0) {
+          // Preferred source: accumulated active processing time
+          resolutionMs = t.accumulated_time_ms;
+        } else if (t.createdAt) {
+          // Fallback for legacy data
+          resolutionMs = businessMsBetweenIst(t.createdAt, resolvedAt);
+        }
+        if (resolutionMs > 0) {
+          priorityAcc[p].resolutionTotalMs += resolutionMs;
+          priorityAcc[p].resolutionCount += 1;
+        }
+      }
+    }
+
+    const priorityKpis = ["Low", "Medium", "High"].map((priority) => {
+      const row = priorityAcc[priority];
+      const avgResponseMs =
+        row.responseCount > 0 ? Math.round(row.responseTotalMs / row.responseCount) : null;
+      const avgResolutionMs =
+        row.resolutionCount > 0 ? Math.round(row.resolutionTotalMs / row.resolutionCount) : null;
+      return {
+        priority,
+        avgResponseMs,
+        avgResolutionMs,
+        responseSampleCount: row.responseCount,
+        resolutionSampleCount: row.resolutionCount,
+      };
+    });
+
     return res.status(200).json({
       status: "success",
       data: {
@@ -155,6 +236,7 @@ const getSlaStatus = async (req, res) => {
         breachedCount,
         metPercentage: metPct,
         breachedPercentage: breachedPct,
+        priorityKpis,
         breachedTickets: breachedTickets.slice(0, 100),
       },
     });

@@ -63,9 +63,19 @@ export const ChoosePhotoWidget = (props) => {
 };
 
 export const CounterWidget = (props) => {
-  const { icon, iconColor, category, title, period, percentage } = props;
-  const percentageIcon = percentage < 0 ? faAngleDown : faAngleUp;
-  const percentageColor = percentage < 0 ? "text-danger" : "text-success";
+  const {
+    icon,
+    iconColor,
+    category,
+    title,
+    period,
+    percentage,
+    changeLabel = "Since last month",
+  } = props;
+  const pct = Number(percentage);
+  const safePct = Number.isFinite(pct) ? pct : 0;
+  const percentageIcon = safePct < 0 ? faAngleDown : faAngleUp;
+  const percentageColor = safePct < 0 ? "text-danger" : "text-success";
 
   return (
     <Card border="light" className="shadow-sm h-100">
@@ -89,8 +99,9 @@ export const CounterWidget = (props) => {
             <div className="small mt-2">
               <FontAwesomeIcon icon={percentageIcon} className={`${percentageColor} me-1`} />
               <span className={`${percentageColor} fw-bold`}>
-                {percentage}%
-              </span> Since last month
+                {safePct}%
+              </span>{" "}
+              {changeLabel}
             </div>
           </Col>
         </Row>

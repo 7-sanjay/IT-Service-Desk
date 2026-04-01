@@ -47,6 +47,17 @@ export default () => {
   const history = useHistory();
   const level = localStorage.getItem("level");
   const isUserRole = level === "user";
+  // Type "I" = Incident (AI Help allowed); "P" = Request (not solvable by AI in-app)
+  const ticketTypeAllowsAiHelp = (request) => {
+    const t = request?.type;
+    if (t === "I") return true;
+    if (typeof t === "string" && t.toLowerCase() === "incident") return true;
+    return false;
+  };
+  const ticketStatusAllowsAiHelp = (request) => {
+    const s = request?.ticket_status;
+    return s !== "C" && s !== "R";
+  };
   let statusVariant = "";
   let statusText = "";
 
@@ -306,18 +317,20 @@ export default () => {
 
                 {isUserRole && (
                   <>
-                    <Dropdown.Item
-                      onClick={() => handleAiHelp(request.id || request._id)}
-                      title="Get AI troubleshooting steps"
-                      className="d-flex align-items-center"
-                    >
-                      <FontAwesomeIcon
-                        icon={faRobot}
-                        className="me-2"
-                        style={{ lineHeight: 1 }}
-                      />
-                      <span className="fw-bold">AI Help</span>
-                    </Dropdown.Item>
+                    {ticketTypeAllowsAiHelp(request) && ticketStatusAllowsAiHelp(request) && (
+                      <Dropdown.Item
+                        onClick={() => handleAiHelp(request.id || request._id)}
+                        title="Get AI troubleshooting steps"
+                        className="d-flex align-items-center"
+                      >
+                        <FontAwesomeIcon
+                          icon={faRobot}
+                          className="me-2"
+                          style={{ lineHeight: 1 }}
+                        />
+                        <span className="fw-bold">AI Help</span>
+                      </Dropdown.Item>
+                    )}
 
                     {request.ticket_status === "D" && (
                       <>

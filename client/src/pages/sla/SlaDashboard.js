@@ -12,6 +12,13 @@ import {
 } from "../../api/requestApi";
 
 const emptyForm = { priority: "Low", responseTime: "", resolutionTime: "" };
+const formatAvg = (ms) => {
+  if (ms === null || ms === undefined) return "-";
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h}h ${m}m`;
+};
 
 export default function SlaDashboard() {
   const [rules, setRules] = useState([]);
@@ -77,6 +84,7 @@ export default function SlaDashboard() {
   };
 
   const breachedTickets = status?.breachedTickets || [];
+  const priorityKpis = status?.priorityKpis || [];
 
   return (
     <>
@@ -115,6 +123,29 @@ export default function SlaDashboard() {
             </Card.Body>
           </Card>
         </Col>
+      </Row>
+
+      <Row>
+        {["Low", "Medium", "High"].map((priority) => {
+          const kpi = priorityKpis.find((p) => p.priority === priority) || {};
+          return (
+            <Col xs={12} md={4} className="mb-4" key={priority}>
+              <Card border="light" className="shadow-sm h-100">
+                <Card.Body>
+                  <h6>{priority} Priority</h6>
+                  <div className="mt-3">
+                    <div>
+                      Avg Response Time: <b>{formatAvg(kpi.avgResponseMs)}</b>
+                    </div>
+                    <div className="mt-1">
+                      Avg Resolution Time: <b>{formatAvg(kpi.avgResolutionMs)}</b>
+                    </div>
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
+          );
+        })}
       </Row>
 
       {canManage && (

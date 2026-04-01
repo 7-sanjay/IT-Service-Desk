@@ -131,21 +131,21 @@ export const getRequestsByPriority = () => {
   return api.get("/requests-by-priority");
 };
 
-// Dashboard stats
-export const getUserDashboardStats = () => {
-  return api.get("/dashboard/user");
+// Dashboard stats — range: 3d | 7d | 30d (period-over-period % change)
+export const getUserDashboardStats = (range = "30d") => {
+  return api.get("/dashboard/user", { params: { range } });
 };
 
-export const getTeamDashboardStats = () => {
-  return api.get("/dashboard/team");
+export const getTeamDashboardStats = (range = "30d") => {
+  return api.get("/dashboard/team", { params: { range } });
 };
 
-export const getHeadDashboardStats = () => {
-  return api.get("/dashboard/head");
+export const getHeadDashboardStats = (range = "30d") => {
+  return api.get("/dashboard/head", { params: { range } });
 };
 
-export const getAdminDashboardStats = () => {
-  return api.get("/dashboard/admin");
+export const getAdminDashboardStats = (range = "30d") => {
+  return api.get("/dashboard/admin", { params: { range } });
 };
 
 // SLA

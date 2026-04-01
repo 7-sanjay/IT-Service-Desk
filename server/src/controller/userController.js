@@ -95,7 +95,7 @@ const loginUser = async (req, res) => {
     if (!user.password) {
       return res.status(400).json({
         status: "error",
-        message: "ID atau Password salah!",
+        message: "Check your username or password!",
       });
     }
 
@@ -112,7 +112,7 @@ const loginUser = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({
         status: "error",
-        message: "ID atau Password salah!",
+        message: "Check your username or password!",
       });
     }
 
@@ -575,10 +575,10 @@ const changeOwnPassword = async (req, res) => {
     });
   }
 
-  if (typeof newPassword !== "string" || newPassword.length < 8) {
+  if (typeof newPassword !== "string" || newPassword.length < 6) {
     return res.status(400).json({
       status: "failed",
-      message: "New password must be at least 8 characters.",
+      message: "New password must be at least 6 characters.",
     });
   }
 

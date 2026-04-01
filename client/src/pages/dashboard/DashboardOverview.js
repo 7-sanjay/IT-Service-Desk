@@ -15,7 +15,7 @@ import {
   faUsers,
   faUsersCog,
 } from "@fortawesome/free-solid-svg-icons";
-import { Col, Row } from "@themesberg/react-bootstrap";
+import { Col, Form, Row } from "@themesberg/react-bootstrap";
 
 import { CounterWidget } from "../../components/Widgets";
 import {
@@ -36,9 +36,17 @@ export default () => {
   const [teamStats, setTeamStats] = useState(null);
   const [headStats, setHeadStats] = useState(null);
   const [adminStats, setAdminStats] = useState(null);
+  const [kpiRange, setKpiRange] = useState("30d");
 
   const level = localStorage.getItem("level");
   const history = useHistory();
+
+  const changeLabel =
+    kpiRange === "3d"
+      ? "vs previous 3 days"
+      : kpiRange === "7d"
+        ? "vs previous 7 days"
+        : "vs previous 30 days";
 
   useEffect(() => {
     let intervalId;
@@ -46,14 +54,14 @@ export default () => {
     const fetchStats = async () => {
       try {
         if (level === "user") {
-          const res = await getUserDashboardStats();
+          const res = await getUserDashboardStats(kpiRange);
           setUserStats(res.data.data);
         } else if (level === "support_engineer" || level === "team") {
-          const res = await getTeamDashboardStats();
+          const res = await getTeamDashboardStats(kpiRange);
           setTeamStats(res.data.data);
         } else if (level === "manager" || level === "head") {
           const [headRes, usersRes, teamsRes] = await Promise.all([
-            getHeadDashboardStats(),
+            getHeadDashboardStats(kpiRange),
             getUsersCount(),
             getTeamsCount(),
           ]);
@@ -62,7 +70,7 @@ export default () => {
           setTeamsCount(teamsRes.data.data);
         } else if (level === "admin") {
           const [adminRes, usersRes, teamsRes] = await Promise.all([
-            getAdminDashboardStats(),
+            getAdminDashboardStats(kpiRange),
             getUsersCount(),
             getTeamsCount(),
           ]);
@@ -78,13 +86,12 @@ export default () => {
     };
 
     fetchStats();
-    // Simple polling for near-realtime updates
     intervalId = setInterval(fetchStats, 10000);
 
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [history, level]);
+  }, [history, level, kpiRange]);
   return (
     <div>
       {/* <div className="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center py-4">
@@ -98,6 +105,22 @@ export default () => {
         </ButtonGroup>
       </div> */}
 
+      <Row className="mt-3 mb-2">
+        <Col xs={12} md={4} lg={3}>
+          <Form.Group>
+            <Form.Label className="mb-1">KPI trend window</Form.Label>
+            <Form.Select
+              value={kpiRange}
+              onChange={(e) => setKpiRange(e.target.value)}
+            >
+              <option value="3d">Last 3 days</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Since last month (30 days)</option>
+            </Form.Select>
+          </Form.Group>
+        </Col>
+      </Row>
+
       <Row className="justify-content-md-center mt-5">
         {level === "user" && userStats && (
           <>
@@ -108,7 +131,8 @@ export default () => {
                 icon={faLayerGroup}
                 iconColor="shape-secondary"
                 period="All time"
-                percentage={0}
+                percentage={userStats.changes?.totalTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -118,7 +142,8 @@ export default () => {
                 icon={faFolderOpen}
                 iconColor="shape-tertiary"
                 period="Realtime"
-                percentage={0}
+                percentage={userStats.changes?.openTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -128,7 +153,8 @@ export default () => {
                 icon={faCheckCircle}
                 iconColor="shape-success"
                 period="Realtime"
-                percentage={0}
+                percentage={userStats.changes?.closedTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -138,7 +164,8 @@ export default () => {
                 icon={faHandHolding}
                 iconColor="shape-warning"
                 period="Realtime"
-                percentage={0}
+                percentage={userStats.changes?.pendingApproval ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
           </>
@@ -153,7 +180,8 @@ export default () => {
                 icon={faTasks}
                 iconColor="shape-secondary"
                 period="Realtime"
-                percentage={0}
+                percentage={teamStats.changes?.ticketsAssigned ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -163,7 +191,8 @@ export default () => {
                 icon={faExclamationTriangle}
                 iconColor="shape-danger"
                 period="Realtime"
-                percentage={0}
+                percentage={teamStats.changes?.highPriorityTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -173,7 +202,8 @@ export default () => {
                 icon={faCheckCircle}
                 iconColor="shape-success"
                 period="Realtime"
-                percentage={0}
+                percentage={teamStats.changes?.ticketsClosed ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -183,7 +213,8 @@ export default () => {
                 icon={faClock}
                 iconColor="shape-tertiary"
                 period="Last 30 days"
-                percentage={0}
+                percentage={teamStats.changes?.avgResolutionMinutes ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
           </>
@@ -198,7 +229,8 @@ export default () => {
                 icon={faLayerGroup}
                 iconColor="shape-secondary"
                 period="All time"
-                percentage={0}
+                percentage={headStats.changes?.totalDeptTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -208,7 +240,8 @@ export default () => {
                 icon={faFolderOpen}
                 iconColor="shape-tertiary"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.openTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -218,7 +251,8 @@ export default () => {
                 icon={faCheckCircle}
                 iconColor="shape-success"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.closedTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -228,7 +262,8 @@ export default () => {
                 icon={faClock}
                 iconColor="shape-tertiary"
                 period="Last 30 days"
-                percentage={0}
+                percentage={headStats.changes?.avgResolutionMinutes ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
 
@@ -239,7 +274,8 @@ export default () => {
                 icon={faHandHolding}
                 iconColor="shape-warning"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.pendingApproval ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -249,7 +285,8 @@ export default () => {
                 icon={faTasks}
                 iconColor="shape-secondary"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.ticketsAssigned ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -259,7 +296,8 @@ export default () => {
                 icon={faCheckCircle}
                 iconColor="shape-success"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.ticketsResolved ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -269,7 +307,8 @@ export default () => {
                 icon={faExclamationTriangle}
                 iconColor="shape-danger"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.escalatedTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
 
@@ -280,7 +319,8 @@ export default () => {
                 icon={faUsers}
                 iconColor="shape-tertiary"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.inWork ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -290,7 +330,8 @@ export default () => {
                 icon={faUsers}
                 iconColor="shape-secondary"
                 period="Realtime"
-                percentage={0}
+                percentage={headStats.changes?.free ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
           </>
@@ -305,7 +346,8 @@ export default () => {
                 icon={faLayerGroup}
                 iconColor="shape-secondary"
                 period="All time"
-                percentage={0}
+                percentage={adminStats.changes?.totalTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -315,7 +357,8 @@ export default () => {
                 icon={faFolderOpen}
                 iconColor="shape-tertiary"
                 period="Realtime"
-                percentage={0}
+                percentage={adminStats.changes?.openTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -325,7 +368,8 @@ export default () => {
                 icon={faBars}
                 iconColor="shape-warning"
                 period="Realtime"
-                percentage={0}
+                percentage={adminStats.changes?.inProgressTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -335,7 +379,8 @@ export default () => {
                 icon={faCheckCircle}
                 iconColor="shape-success"
                 period="Realtime"
-                percentage={0}
+                percentage={adminStats.changes?.closedTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
 
@@ -346,7 +391,8 @@ export default () => {
                 icon={faUser}
                 iconColor="shape-secondary"
                 period="All time"
-                percentage={0}
+                percentage={adminStats.changes?.totalUsers ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -356,7 +402,8 @@ export default () => {
                 icon={faUsersCog}
                 iconColor="shape-tertiary"
                 period="All time"
-                percentage={0}
+                percentage={adminStats.changes?.totalTechnicians ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -366,7 +413,8 @@ export default () => {
                 icon={faUsers}
                 iconColor="shape-warning"
                 period="All time"
-                percentage={0}
+                percentage={adminStats.changes?.departmentHeads ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
 
@@ -377,7 +425,8 @@ export default () => {
                 icon={faRobot}
                 iconColor="shape-success"
                 period="All time"
-                percentage={adminStats.aiMetrics.aiSuccessRate}
+                percentage={adminStats.changes?.aiResolvedTickets ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
             <Col xs={12} sm={6} xl={3} className="mb-4">
@@ -387,7 +436,8 @@ export default () => {
                 icon={faRobot}
                 iconColor="shape-tertiary"
                 period="All time"
-                percentage={adminStats.aiMetrics.aiSuccessRate}
+                percentage={adminStats.changes?.aiSuccessRate ?? 0}
+                changeLabel={changeLabel}
               />
             </Col>
           </>
