@@ -1,6 +1,6 @@
 import React from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSignOutAlt, faUser } from "@fortawesome/free-solid-svg-icons";
+import { faUser } from "@fortawesome/free-solid-svg-icons";
 import { faUserCircle } from "@fortawesome/free-regular-svg-icons";
 import {
   Nav,
@@ -13,12 +13,6 @@ import { Routes } from "../routes";
 
 export default (props) => {
   const history = useHistory();
-
-  const logoutHandler = () => {
-    console.log("Logout tapped");
-    localStorage.clear();
-    return history.push(Routes.Signin.path);
-  };
 
   return (
     <Navbar variant="dark" expanded className="ps-0 pe-2 pb-0">
@@ -45,17 +39,6 @@ export default (props) => {
                 >
                   <FontAwesomeIcon icon={faUserCircle} className="me-2" /> My
                   Profile
-                </Dropdown.Item>
-                <Dropdown.Divider />
-                <Dropdown.Item
-                  onClick={() => logoutHandler()}
-                  className="fw-bold"
-                >
-                  <FontAwesomeIcon
-                    icon={faSignOutAlt}
-                    className="text-danger me-2"
-                  />{" "}
-                  Logout
                 </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown>

@@ -48,6 +48,27 @@ export const addRequest = (request) => {
   });
 };
 
+/** Save to ticket_drafts only — no row in requests until promote */
+export const createTicketDraft = (request) => {
+  return api.post("/ticket-drafts", request, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+};
+
+export const getDraftAiHelp = (id) => {
+  return api.get(`/ticket-drafts/${id}/ai-help`);
+};
+
+export const promoteTicketDraft = (id) => {
+  return api.post(`/ticket-drafts/${id}/promote`);
+};
+
+export const dismissTicketDraft = (id) => {
+  return api.delete(`/ticket-drafts/${id}`);
+};
+
 // UTILS
 export const getDetailRequest = (id) => {
   return api.get(`/requests/${id}`);

@@ -39,6 +39,10 @@ const {
   getRequestsByCategory,
   getRequestsByPriority,
   getRequestAiHelp,
+  createTicketDraft,
+  getDraftAiHelp,
+  promoteTicketDraft,
+  dismissTicketDraft,
   getUserDashboardStats,
   getTeamDashboardStats,
   getHeadDashboardStats,
@@ -138,6 +142,10 @@ const cpUpload = upload.fields([
   { name: "file_document", maxCount: 1 },
 ]);
 router.post("/requests", isAuth, cpUpload, createRequest);
+router.post("/ticket-drafts", isAuth, cpUpload, createTicketDraft);
+router.get("/ticket-drafts/:id/ai-help", isAuth, getDraftAiHelp);
+router.post("/ticket-drafts/:id/promote", isAuth, promoteTicketDraft);
+router.delete("/ticket-drafts/:id", isAuth, dismissTicketDraft);
 router.get("/requests", isAuth, getAllUserRequest);
 router.get("/dashboard/user", isAuth, getUserDashboardStats);
 

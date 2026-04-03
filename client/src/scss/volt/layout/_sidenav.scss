@@ -163,6 +163,34 @@
   }
 }
 
+// Scroll area + footer: keeps Logout pinned to viewport bottom (flex + SimpleBar was unreliable)
+.sidebar.sidebar-with-footer {
+  overflow: hidden !important;
+
+  > [data-simplebar] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+  }
+
+  .sidebar-inner {
+    padding-bottom: 5rem;
+  }
+
+  .sidebar-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+  }
+}
+
 .sidebar-inner {
   position: relative;
   overflow-y: hidden;

@@ -21,7 +21,6 @@ import {
   Badge,
   Image,
   Button,
-  Dropdown,
   Accordion,
   Navbar,
 } from "@themesberg/react-bootstrap";
@@ -53,6 +52,11 @@ export default (props = {}) => {
     }
   }, [isExpired, token, history]);
   const onCollapse = () => setShow(!show);
+
+  const logoutHandler = () => {
+    localStorage.clear();
+    history.push(Routes.Signin.path);
+  };
 
   const CollapsableNavItem = (props) => {
     const { eventKey, title, icon, children = null } = props;
@@ -198,38 +202,29 @@ export default (props = {}) => {
         </Navbar.Toggle>
       </Navbar>
       <CSSTransition timeout={300} in={show} classNames="sidebar-transition">
-        <SimpleBar
-          className={`collapse ${showClass} sidebar d-md-block text-white`}
+        <div
+          className={`collapse ${showClass} sidebar sidebar-with-footer d-md-block text-white`}
           style={{ backgroundColor: "#1e3a5f" }}
         >
-          <div className="sidebar-inner px-4 pt-3">
-            <div className="user-card d-flex d-md-none align-items-center justify-content-between justify-content-md-center pb-4">
-              <div className="d-flex align-items-center">
-                <div className="user-avatar lg-avatar me-4 d-flex align-items-center justify-content-center rounded-circle bg-white bg-opacity-25">
-                  <FontAwesomeIcon icon={faUser} className="text-white" style={{ fontSize: "1.75rem" }} />
+          <SimpleBar className="w-100 sidebar-scroll">
+            <div className="sidebar-inner px-4 pt-3">
+              <div className="user-card d-flex d-md-none align-items-center justify-content-between justify-content-md-center pb-4">
+                <div className="d-flex align-items-center">
+                  <div className="user-avatar lg-avatar me-4 d-flex align-items-center justify-content-center rounded-circle bg-white bg-opacity-25">
+                    <FontAwesomeIcon icon={faUser} className="text-white" style={{ fontSize: "1.75rem" }} />
+                  </div>
+                  <div className="d-block">
+                    <h6 className="text-white">Hi, {localStorage.getItem("username")}</h6>
+                  </div>
                 </div>
-                <div className="d-block">
-                  <h6 className="text-white">Hi, {localStorage.getItem("username")}</h6>
-                  <Button
-                    as={Link}
-                    variant="light"
-                    size="xs"
-                    to={Routes.Signin.path}
-                    className="text-dark"
-                  >
-                    <FontAwesomeIcon icon={faSignOutAlt} className="me-2" />{" "}
-                    Sign Out
-                  </Button>
-                </div>
+                <Nav.Link
+                  className="collapse-close d-md-none text-white"
+                  onClick={onCollapse}
+                >
+                  <FontAwesomeIcon icon={faTimes} />
+                </Nav.Link>
               </div>
-              <Nav.Link
-                className="collapse-close d-md-none text-white"
-                onClick={onCollapse}
-              >
-                <FontAwesomeIcon icon={faTimes} />
-              </Nav.Link>
-            </div>
-            <Nav className="flex-column pt-3 pt-md-0 text-white">
+              <Nav className="flex-column pt-3 pt-md-0 text-white">
               <NavItem title="Service Desk System" image={ReactHero} />
 
               <NavItem
@@ -376,11 +371,25 @@ export default (props = {}) => {
                   link={Routes.BootstrapTables.path}
                 />
               </CollapsableNavItem> */}
-
-              <Dropdown.Divider className="my-3 border-indigo" />
             </Nav>
           </div>
-        </SimpleBar>
+          </SimpleBar>
+          <div
+            className="sidebar-footer px-4 pb-4 pt-3 border-top border-white border-opacity-10"
+            style={{ backgroundColor: "#1e3a5f" }}
+          >
+            <Button
+              variant="link"
+              className="text-white text-decoration-none p-0 d-flex align-items-center"
+              onClick={logoutHandler}
+            >
+              <span className="sidebar-icon text-white">
+                <FontAwesomeIcon icon={faSignOutAlt} />{" "}
+              </span>
+              <span className="sidebar-text text-white">Logout</span>
+            </Button>
+          </div>
+        </div>
       </CSSTransition>
     </>
   );

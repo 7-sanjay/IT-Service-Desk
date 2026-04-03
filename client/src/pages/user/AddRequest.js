@@ -1,10 +1,24 @@
-import React, { useState } from "react";
-import { Form, Button, Card, Spinner } from "@themesberg/react-bootstrap";
+import React, { useState, useRef } from "react";
+import {
+  Form,
+  Button,
+  Card,
+  Spinner,
+  Modal,
+} from "@themesberg/react-bootstrap";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faRobot } from "@fortawesome/free-solid-svg-icons";
 import { toast } from "react-toastify";
 
-import { addRequest } from "../../api/requestApi";
+import {
+  createTicketDraft,
+  getDraftAiHelp,
+  promoteTicketDraft,
+  dismissTicketDraft,
+} from "../../api/requestApi";
 import { Routes } from "../../routes";
 import { useHistory } from "react-router-dom";
+
 export default () => {
   const [isPending, setIsPending] = useState(false);
   const history = useHistory();
@@ -14,12 +28,19 @@ export default () => {
     email: localStorage.getItem("email"),
     type: "",
     category: "",
-    // priority: "",
     titleRequest: "",
     subjectRequest: "",
     image: "",
     file_document: "",
   });
+
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [draftId, setDraftId] = useState(null);
+  const [aiHelpLoading, setAiHelpLoading] = useState(false);
+  const [aiHelpContent, setAiHelpContent] = useState("");
+  const [aiHelpError, setAiHelpError] = useState("");
+  const [promoteLoading, setPromoteLoading] = useState(false);
+  const draftHandledRef = useRef(false);
 
   const incidentCategories = [
     "Hardware Issue",
@@ -59,9 +80,113 @@ export default () => {
     }
   };
 
+  const resetForm = () => {
+    setRequest({
+      userRequest: localStorage.getItem("username"),
+      department: "",
+      email: localStorage.getItem("email"),
+      type: "",
+      category: "",
+      titleRequest: "",
+      subjectRequest: "",
+      image: "",
+      file_document: "",
+    });
+  };
+
+  const closeAiModalAndCleanup = async () => {
+    if (draftId && !draftHandledRef.current) {
+      try {
+        await dismissTicketDraft(draftId);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    setShowAiModal(false);
+    setDraftId(null);
+    setAiHelpContent("");
+    setAiHelpError("");
+    setAiHelpLoading(false);
+    draftHandledRef.current = false;
+  };
+
+  const loadAiHelpForDraft = async (id) => {
+    setAiHelpLoading(true);
+    setAiHelpContent("");
+    setAiHelpError("");
+    try {
+      const res = await getDraftAiHelp(id);
+      if (res.data.status === "success" && res.data.data?.troubleshooting) {
+        setAiHelpContent(res.data.data.troubleshooting);
+      } else {
+        setAiHelpError("No troubleshooting steps returned.");
+      }
+    } catch (err) {
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        "Failed to load AI help.";
+      setAiHelpError(msg);
+    } finally {
+      setAiHelpLoading(false);
+    }
+  };
+
+  const handleSolvedByAi = async () => {
+    if (!draftId) return;
+    setPromoteLoading(true);
+    try {
+      await dismissTicketDraft(draftId);
+      draftHandledRef.current = true;
+      toast.success("No ticket was sent to the queue. You can open a new request if needed.");
+      await closeAiModalAndCleanup();
+      resetForm();
+      history.push(Routes.ListUserRequests.path);
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message || "Could not dismiss the draft."
+      );
+    } finally {
+      setPromoteLoading(false);
+    }
+  };
+
+  const handleNotSolvedByAi = async () => {
+    if (!draftId) return;
+    setPromoteLoading(true);
+    try {
+      const res = await promoteTicketDraft(draftId);
+      draftHandledRef.current = true;
+      const newId = res.data?.data?.id;
+      toast.success(
+        res.data?.message || "Ticket submitted to the support queue."
+      );
+      setShowAiModal(false);
+      setDraftId(null);
+      setAiHelpContent("");
+      setAiHelpError("");
+      resetForm();
+      history.push(Routes.ListUserRequests.path);
+
+      const pdfUrl = newId
+        ? `/#/ticketing/render?id=${newId}`
+        : `/#/ticketing/render?user=${request.userRequest}&department=${request.department}&type=${request.type}&category=${request.category}&title=${request.titleRequest}&subject=${request.subjectRequest}`;
+      window.open(pdfUrl, "_blank");
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message || "Failed to submit ticket to support."
+      );
+    } finally {
+      setPromoteLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsPending(true);
+    draftHandledRef.current = false;
+
+    formData = new FormData();
     formData.append("userRequest", request.userRequest);
     formData.append("department", request.department);
     formData.append("email", request.email);
@@ -69,40 +194,31 @@ export default () => {
     formData.append("category", request.category);
     formData.append("titleRequest", request.titleRequest);
     formData.append("subjectRequest", request.subjectRequest);
-    formData.append("image", request.image);
-    formData.append("file_document", request.file_document);
+    if (request.image) formData.append("image", request.image);
+    if (request.file_document) formData.append("file_document", request.file_document);
 
-    const sentRequest = await addRequest(formData);
+    try {
+      const sent = await createTicketDraft(formData);
+      if (sent.data?.status !== "success" || !sent.data?.data?.id) {
+        toast.error(
+          sent.data?.message || "Could not save draft. Please try again."
+        );
+        setIsPending(false);
+        return;
+      }
 
-    if (sentRequest.error) {
-      toast.error("Oops! Something went wrong! Please try again later.");
+      const id = sent.data.data.id;
+      setDraftId(id);
+      setShowAiModal(true);
+      await loadAiHelpForDraft(id);
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message ||
+          "Oops! Something went wrong. Please try again later."
+      );
+    } finally {
+      setIsPending(false);
     }
-
-    toast.success("Request has been sent!");
-
-    setRequest({
-      userRequest: localStorage.getItem("username"),
-      department: "",
-      email: "",
-      type: "",
-      category: "",
-      // priority: "",
-      titleRequest: "",
-      subjectRequest: "",
-    });
-    setIsPending(false);
-    history.push(Routes.ListUserRequests.path);
-
-    const createdId = sentRequest?.data?.data?.id;
-    const pdfUrl = createdId
-      ? `/#/ticketing/render?id=${createdId}`
-      : `/#/ticketing/render?user=${request.userRequest}&department=${request.department}&type=${request.type}&category=${request.category}&title=${request.titleRequest}&subject=${request.subjectRequest}`;
-
-    window.open(pdfUrl, "_blank");
-    // window.open(
-    //   `/#/ticketing/render?user=alwan&department=Finance&category=Install Software&title=request title&subject=lorem ipsum dolor sit amet consectetur adipisicing elit. Quisquam, quaerat! Quasi, quisquam. Quasi, quisquam.`,
-    //   "_blank"
-    // );
   };
 
   return (
@@ -175,20 +291,6 @@ export default () => {
             </Form.Select>
           </Form.Group>
 
-          {/* PRIORITY */}
-          {/* <Form.Group className="mb-3">
-            <Form.Label>Priority</Form.Label>
-            <Form.Select
-              onChange={(e) =>
-                setRequest({ ...request, priority: e.target.value })
-              }
-            >
-              <option defaultValue>Open this select menu</option>
-              <option value="Low">Low</option>
-              <option value="High">High</option>
-            </Form.Select>
-          </Form.Group> */}
-
           <Form.Group controlId="titleRequest" className="mb-3">
             <Form.Label>Request title</Form.Label>
             <Form.Control
@@ -242,7 +344,7 @@ export default () => {
 
           {isPending ? (
             <Button variant="primary" type="submit" disabled>
-              <Spinner animation="border" size="sm" role="status" /> Sending...
+              <Spinner animation="border" size="sm" role="status" /> Saving…
             </Button>
           ) : (
             <Button variant="primary" type="submit">
@@ -251,6 +353,78 @@ export default () => {
           )}
         </Form>
       </Card>
+
+      <Modal
+        show={showAiModal}
+        onHide={closeAiModalAndCleanup}
+        size="lg"
+        centered
+        backdrop={promoteLoading ? "static" : true}
+        keyboard={!promoteLoading}
+      >
+        <Modal.Header closeButton={!promoteLoading}>
+          <Modal.Title>
+            <FontAwesomeIcon icon={faRobot} className="me-2" />
+            AI Troubleshooting Steps
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {aiHelpLoading && (
+            <div className="text-center py-4">
+              <Spinner animation="border" />
+              <p className="mt-2 mb-0">Analyzing your request…</p>
+            </div>
+          )}
+          {!aiHelpLoading && aiHelpError && (
+            <p className="text-danger mb-0">{aiHelpError}</p>
+          )}
+          {!aiHelpLoading && aiHelpContent && (
+            <div
+              className="text-start"
+              style={{ whiteSpace: "pre-wrap" }}
+            >
+              {aiHelpContent}
+            </div>
+          )}
+          {!aiHelpLoading && (
+            <p className="mt-3 mb-0 small text-muted">
+              If these steps fixed your issue, choose &quot;Solved by AI&quot;
+              (no ticket will be sent). Otherwise choose &quot;Not solved by
+              AI&quot; to send this ticket to the support team.
+            </p>
+          )}
+        </Modal.Body>
+        <Modal.Footer className="d-flex flex-wrap gap-2">
+          <Button
+            variant="success"
+            onClick={handleSolvedByAi}
+            disabled={promoteLoading || aiHelpLoading}
+          >
+            {promoteLoading ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-1" />
+                Please wait…
+              </>
+            ) : (
+              "Solved by AI"
+            )}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleNotSolvedByAi}
+            disabled={promoteLoading || aiHelpLoading}
+          >
+            {promoteLoading ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-1" />
+                Submitting…
+              </>
+            ) : (
+              "Not solved by AI"
+            )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 };

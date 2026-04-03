@@ -216,7 +216,11 @@ export default () => {
   };
 
   const handleEscalate = async (id) => {
-    if (!window.confirm("Are you sure you want to escalate this ticket to the head? This will notify them that you need assistance.")) {
+    if (
+      !window.confirm(
+        "Are you sure you want to escalate? This will notify the manager."
+      )
+    ) {
       return;
     }
     try {
@@ -227,7 +231,7 @@ export default () => {
         }
         return item;
       });
-      toast.success("Ticket escalated to head successfully!");
+      toast.success("Ticket escalated to manager successfully!");
       history.push(Routes.UserRequestTeam.path);
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to escalate ticket!");
@@ -347,6 +351,7 @@ export default () => {
                 {request.ticket_status === "P" ? (
                   <>
                     <Dropdown.Item
+                      className="text-success fw-bold"
                       onClick={() => {
                         handleDoneRequest(request.id || request._id);
                       }}
@@ -355,12 +360,13 @@ export default () => {
                       Mark as Done
                     </Dropdown.Item>
                     <Dropdown.Item
+                      className="text-primary fw-bold"
                       onClick={() => {
                         handleEscalate(request.id || request._id);
                       }}
                     >
                       <FontAwesomeIcon icon={faEllipsisH} className="me-2" />{" "}
-                      Escalate to Head
+                      Escalate to Manager
                     </Dropdown.Item>
                   </>
                 ) : null}

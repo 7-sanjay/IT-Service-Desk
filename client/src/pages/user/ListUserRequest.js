@@ -157,20 +157,25 @@ export default () => {
   };
 
   const handleReopenTicket = async (requestId) => {
-    if (window.confirm("The issue is not solved? Click OK to reopen the ticket for the team.")) {
-      try {
-        await reopenTicket(requestId);
-        toast.success("Ticket reopened successfully.");
-        const getRequest = await getAllUserRequest();
-        setListRequest(getRequest.data.data.requests);
-        setTotalPage(getRequest.data.data.totalPages);
-      } catch (err) {
-        const msg =
-          err.response?.data?.message ||
-          err.message ||
-          "Failed to reopen ticket.";
-        toast.error(msg);
-      }
+    if (
+      !window.confirm(
+        "Are you sure you want to escalate? The ticket will be sent to a manager."
+      )
+    ) {
+      return;
+    }
+    try {
+      await reopenTicket(requestId);
+      toast.success("Ticket escalated to manager successfully.");
+      const getRequest = await getAllUserRequest();
+      setListRequest(getRequest.data.data.requests);
+      setTotalPage(getRequest.data.data.totalPages);
+    } catch (err) {
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        "Failed to escalate ticket.";
+      toast.error(msg);
     }
   };
 
@@ -338,14 +343,14 @@ export default () => {
                           onClick={() => handleConfirmDone(request.id || request._id)}
                           disabled={resolveLoading}
                           title="Confirm issue is solved and close ticket"
-                          className="d-flex align-items-center"
+                          className="d-flex align-items-center text-success fw-bold"
                         >
                           <FontAwesomeIcon
                             icon={faCheckCircle}
                             className="me-2"
                             style={{ lineHeight: 1 }}
                           />
-                          <span className="fw-bold">
+                          <span>
                             {resolveLoading ? "Closing..." : "Confirm Solved"}
                           </span>
                         </Dropdown.Item>
@@ -353,15 +358,15 @@ export default () => {
                         <Dropdown.Item
                           onClick={() => handleReopenTicket(request.id || request._id)}
                           disabled={resolveLoading}
-                          title="Issue not solved - reopen ticket"
-                          className="d-flex align-items-center"
+                          title="Issue not solved — escalate to manager"
+                          className="d-flex align-items-center text-primary fw-bold"
                         >
                           <FontAwesomeIcon
                             icon={faExclamationCircle}
                             className="me-2"
                             style={{ lineHeight: 1 }}
                           />
-                          <span className="fw-bold">Issue Not Solved</span>
+                          <span>Issue Not Solved</span>
                         </Dropdown.Item>
                       </>
                     )}

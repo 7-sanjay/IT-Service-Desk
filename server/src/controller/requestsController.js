@@ -329,6 +329,7 @@ const createRequest = async (req, res) => {
           : null,
       replies: [],
     });
+    insertedId = insertResult.insertedId;
   } catch (mongoErr) {
     console.error("Failed to save request to MongoDB:", mongoErr.message);
   }
@@ -1264,7 +1265,7 @@ const userResolveRequest = async (req, res) => {
   }
 };
 
-// User (role) reopens ticket when issue is not solved (changes status from "D" Done back to "P" Progress)
+// User (role) reports issue not solved after engineer marked Done (D) → escalate to manager (E)
 const reopenTicket = async (req, res) => {
   const { id } = req.params;
 
@@ -1288,23 +1289,26 @@ const reopenTicket = async (req, res) => {
       });
     }
 
-    // Only allow reopening tickets that are in "Done" status
+    // Only after support marked the ticket Done (awaiting user confirmation)
     if (request.ticket_status !== "D") {
       return res.status(400).json({
         status: "failed",
-        message: "Only tickets marked as 'Done' can be reopened.",
+        message: "Only tickets marked as 'Done' can be escalated this way.",
       });
     }
 
     const now = new Date();
     const updateData = {
-      ticket_status: "P",
-      start_process_ticket: now, // Resume timer from now
-      end_date_ticket: null, // Clear end date
+      ticket_status: "E",
       updatedAt: now,
+      escalated: true,
+      user_escalated_after_done: true,
+      end_date_ticket: null,
     };
 
-    // Keep accumulated_time_ms as is (time already accumulated from previous processing)
+    if (!request.sla_pause) {
+      updateData.sla_pause = { reason: "user_escalated_after_done", startedAt: now };
+    }
 
     const updateStatus = await requestsCollection.updateOne(
       { _id: new ObjectId(id) },
@@ -1320,7 +1324,7 @@ const reopenTicket = async (req, res) => {
 
     res.status(200).json({
       status: "success",
-      message: "Ticket reopened successfully.",
+      message: "Ticket escalated to manager successfully.",
     });
   } catch (err) {
     console.error("reopenTicket error:", err.message);
@@ -1331,7 +1335,7 @@ const reopenTicket = async (req, res) => {
   }
 };
 
-// Team (role) escalates ticket to head when they cannot solve the problem
+// Team (role) escalates ticket to manager when they cannot solve the problem
 const escalateRequest = async (req, res) => {
   const { id } = req.params;
 
@@ -1396,7 +1400,7 @@ const escalateRequest = async (req, res) => {
 
     res.status(200).json({
       status: "success",
-      message: "Ticket escalated to head successfully.",
+      message: "Ticket escalated to manager successfully.",
     });
   } catch (err) {
     console.error("escalateRequest error:", err.message);
@@ -1531,6 +1535,100 @@ const filterDataByDate = async (req, res) => {
   }
 };
 
+const buildAiTroubleshootingPrompt = (title, description) =>
+  `Analyse the IT service desk ticket, identify the issue category, and generate concise, prioritized troubleshooting steps starting with the most probable cause;limit to 6 to 8 numbered steps, no bold text and no extra explanation.
+
+Title: ${title && String(title).trim() ? title : "N/A"}
+Description: ${description}`;
+
+/** Returns troubleshooting text or throws (for use inside try/catch with HTTP error mapping). */
+const runGeminiTroubleshooting = async (prompt) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    const e = new Error("GEMINI_NOT_CONFIGURED");
+    e.code = "GEMINI_NOT_CONFIGURED";
+    throw e;
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const freeTierModels = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+  ];
+  const modelIds = process.env.GEMINI_MODEL
+    ? [process.env.GEMINI_MODEL]
+    : freeTierModels;
+
+  const isQuotaOrRateLimit = (e) =>
+    e.message &&
+    (e.message.includes("429") ||
+      e.message.includes("Too Many Requests") ||
+      e.message.includes("quota") ||
+      e.message.includes("rate limit"));
+  const isModelNotFound = (e) =>
+    e.message && (e.message.includes("404") || e.message.includes("not found"));
+
+  let lastError = null;
+  const retryDelayMs = 40000;
+
+  for (const modelId of modelIds) {
+    const model = genAI.getGenerativeModel({ model: modelId });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        return response.text();
+      } catch (e) {
+        lastError = e;
+        if (attempt < 2 && isQuotaOrRateLimit(e)) {
+          console.warn(
+            `runGeminiTroubleshooting [${modelId}] attempt ${attempt} rate-limited, retrying in ${retryDelayMs / 1000}s...`
+          );
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        } else if (isModelNotFound(e) && modelIds.indexOf(modelId) < modelIds.length - 1) {
+          console.warn(`runGeminiTroubleshooting [${modelId}] not available, trying next model...`);
+          break;
+        } else {
+          throw e;
+        }
+      }
+    }
+  }
+  throw lastError;
+};
+
+const mapGeminiHttpError = (err, res) => {
+  if (err.code === "GEMINI_NOT_CONFIGURED") {
+    return res.status(503).json({
+      status: "failed",
+      message: "AI Help is not configured. Please set GEMINI_API_KEY in server environment.",
+    });
+  }
+  if (err.message && err.message.includes("API key")) {
+    return res.status(401).json({
+      status: "failed",
+      message: "Invalid or missing Gemini API key.",
+    });
+  }
+  if (
+    err.message &&
+    (err.message.includes("429") ||
+      err.message.includes("Too Many Requests") ||
+      err.message.includes("quota"))
+  ) {
+    return res.status(429).json({
+      status: "failed",
+      message:
+        "Gemini API rate limit or quota exceeded. Please try again in a minute, or check your plan and billing at https://ai.google.dev/gemini-api/docs/rate-limits",
+    });
+  }
+  return res.status(500).json({
+    status: "failed",
+    message: err.message || "Something went wrong while generating AI help.",
+  });
+};
+
 // AI Help: get troubleshooting steps from Gemini based on request description (user role)
 const getRequestAiHelp = async (req, res) => {
   const { id } = req.params;
@@ -1539,14 +1637,6 @@ const getRequestAiHelp = async (req, res) => {
     return res.status(400).json({
       status: "failed",
       message: "Invalid request id",
-    });
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return res.status(503).json({
-      status: "failed",
-      message: "AI Help is not configured. Please set GEMINI_API_KEY in server environment.",
     });
   }
 
@@ -1564,7 +1654,6 @@ const getRequestAiHelp = async (req, res) => {
       });
     }
 
-    // AI Help is only for Incident tickets (type "I"), not Request ("P")
     const typeRaw = request.type;
     const isIncident =
       typeRaw === "I" ||
@@ -1576,7 +1665,6 @@ const getRequestAiHelp = async (req, res) => {
       });
     }
 
-    // For user role, ensure the request belongs to the current user
     if (req.decoded.level === "user" && String(request.id_user) !== String(req.decoded.id)) {
       return res.status(403).json({
         status: "failed",
@@ -1585,8 +1673,8 @@ const getRequestAiHelp = async (req, res) => {
     }
 
     const detail = request.requests_detail || request.detail || {};
-    const description =
-      detail.subject_request ?? detail.subjek_request ?? "";
+    const description = detail.subject_request ?? detail.subjek_request ?? "";
+    const title = detail.title_request ?? "";
 
     if (!description || !description.trim()) {
       return res.status(400).json({
@@ -1595,77 +1683,304 @@ const getRequestAiHelp = async (req, res) => {
       });
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    // Prefer free-tier models (no billing). Order: flash-lite (best free quota) → 2.5-flash → 2.0-flash. Override with GEMINI_MODEL to force one model.
-    const freeTierModels = [
-      "gemini-2.5-flash-lite",  // Free: 15 RPM, 1000 RPD
-      "gemini-2.5-flash",       // Free: 10 RPM, 250 RPD
-      "gemini-2.0-flash",
-    ];
-    const modelIds = process.env.GEMINI_MODEL
-      ? [process.env.GEMINI_MODEL]
-      : freeTierModels;
-    const prompt = `Analyse the IT service desk ticket, identify the issue category, and generate concise, prioritized troubleshooting steps starting with the most probable cause;limit to 6 to 8 numbered steps, no bold text and no extra explanation.
-
-Description: ${description}`;
-
-    const isQuotaOrRateLimit = (e) =>
-      e.message && (
-        e.message.includes("429") ||
-        e.message.includes("Too Many Requests") ||
-        e.message.includes("quota") ||
-        e.message.includes("rate limit")
-      );
-    const isModelNotFound = (e) =>
-      e.message && (e.message.includes("404") || e.message.includes("not found"));
-
-    let lastError = null;
-    const retryDelayMs = 40000;
-
-    for (const modelId of modelIds) {
-      const model = genAI.getGenerativeModel({ model: modelId });
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const result = await model.generateContent(prompt);
-          const response = result.response;
-          const text = response.text();
-          return res.status(200).json({
-            status: "success",
-            message: "Successfully generated troubleshooting steps.",
-            data: { troubleshooting: text },
-          });
-        } catch (e) {
-          lastError = e;
-          if (attempt < 2 && isQuotaOrRateLimit(e)) {
-            console.warn(`getRequestAiHelp [${modelId}] attempt ${attempt} rate-limited, retrying in ${retryDelayMs / 1000}s...`);
-            await new Promise((r) => setTimeout(r, retryDelayMs));
-          } else if (isModelNotFound(e) && modelIds.indexOf(modelId) < modelIds.length - 1) {
-            console.warn(`getRequestAiHelp [${modelId}] not available, trying next model...`);
-            break;
-          } else {
-            throw e;
-          }
-        }
-      }
-    }
-    throw lastError;
+    const prompt = buildAiTroubleshootingPrompt(title, description);
+    const text = await runGeminiTroubleshooting(prompt);
+    return res.status(200).json({
+      status: "success",
+      message: "Successfully generated troubleshooting steps.",
+      data: { troubleshooting: text },
+    });
   } catch (err) {
     console.error("getRequestAiHelp error:", err.message);
-    if (err.message && err.message.includes("API key")) {
-      return res.status(401).json({
-        status: "failed",
-        message: "Invalid or missing Gemini API key.",
-      });
+    return mapGeminiHttpError(err, res);
+  }
+};
+
+/** Pre-queue draft: stored in ticket_drafts until user promotes or dismisses after AI step */
+const createTicketDraft = async (req, res) => {
+  const url = req.protocol + "://" + req.get("host");
+  const {
+    userRequest,
+    department,
+    category,
+    type,
+    email,
+    titleRequest,
+  } = req.body;
+  const subjectRequest = req.body.subjectRequest ?? req.body.subjekRequest ?? "";
+
+  const priority = determinePriority(category, titleRequest, subjectRequest);
+
+  try {
+    const db = getDb();
+    const draftsCollection = db.collection("ticket_drafts");
+
+    let imageFile = null;
+    let fileDocument = null;
+
+    if (req.files && Object.keys(req.files).length > 0) {
+      if (req.files.image && req.files.image.length > 0) {
+        imageFile = url + "/public/files/" + req.files.image[0].filename;
+      }
+      if (req.files.file_document && req.files.file_document.length > 0) {
+        fileDocument =
+          url + "/public/files/" + req.files.file_document[0].filename;
+      }
     }
-    if (err.message && (err.message.includes("429") || err.message.includes("Too Many Requests") || err.message.includes("quota"))) {
-      return res.status(429).json({
-        status: "failed",
-        message: "Gemini API rate limit or quota exceeded. Please try again in a minute, or check your plan and billing at https://ai.google.dev/gemini-api/docs/rate-limits",
-      });
-    }
-    res.status(500).json({
+
+    const now = new Date();
+    const insertResult = await draftsCollection.insertOne({
+      id_user: req.decoded.id,
+      user_request: req.decoded.username,
+      category,
+      type,
+      email_request: req.decoded.email,
+      department,
+      priority: normalizePriority(priority),
+      requests_detail: {
+        title_request: titleRequest,
+        subject_request: subjectRequest,
+      },
+      detail: {
+        title_request: titleRequest,
+        subject_request: subjectRequest,
+      },
+      file:
+        imageFile || fileDocument
+          ? {
+              image: imageFile,
+              file_document: fileDocument,
+            }
+          : null,
+      files:
+        imageFile || fileDocument
+          ? {
+              image: imageFile,
+              file_document: fileDocument,
+            }
+          : null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const insertedId = insertResult.insertedId;
+
+    return res.status(201).json({
+      status: "success",
+      message: "Draft saved. Open AI troubleshooting next.",
+      data: { id: insertedId.toString() },
+    });
+  } catch (err) {
+    console.error("createTicketDraft error:", err.message);
+    return res.status(500).json({
       status: "failed",
-      message: err.message || "Something went wrong while generating AI help.",
+      message: "Something went wrong while saving the draft.",
+    });
+  }
+};
+
+const assertDraftOwner = (draft, decoded) =>
+  String(draft.id_user) === String(decoded.id);
+
+const getDraftAiHelp = async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ status: "failed", message: "Invalid draft id" });
+  }
+
+  try {
+    const db = getDb();
+    const draftsCollection = db.collection("ticket_drafts");
+    const draft = await draftsCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!draft) {
+      return res.status(404).json({ status: "failed", message: "Draft not found" });
+    }
+
+    if (!assertDraftOwner(draft, req.decoded)) {
+      return res.status(403).json({ status: "failed", message: "You can only access your own drafts." });
+    }
+
+    const detail = draft.requests_detail || draft.detail || {};
+    const description = detail.subject_request ?? detail.subjek_request ?? "";
+    const title = detail.title_request ?? "";
+
+    if (!description || !description.trim()) {
+      return res.status(400).json({
+        status: "failed",
+        message: "This draft has no description to analyze.",
+      });
+    }
+
+    const prompt = buildAiTroubleshootingPrompt(title, description);
+    const text = await runGeminiTroubleshooting(prompt);
+    return res.status(200).json({
+      status: "success",
+      message: "Successfully generated troubleshooting steps.",
+      data: { troubleshooting: text },
+    });
+  } catch (err) {
+    console.error("getDraftAiHelp error:", err.message);
+    return mapGeminiHttpError(err, res);
+  }
+};
+
+const promoteTicketDraft = async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ status: "failed", message: "Invalid draft id" });
+  }
+
+  try {
+    const db = getDb();
+    const draftsCollection = db.collection("ticket_drafts");
+    const requestsCollection = db.collection("requests");
+
+    const draft = await draftsCollection.findOne({ _id: new ObjectId(id) });
+    if (!draft) {
+      return res.status(404).json({ status: "failed", message: "Draft not found" });
+    }
+
+    if (!assertDraftOwner(draft, req.decoded)) {
+      return res.status(403).json({ status: "failed", message: "You can only promote your own drafts." });
+    }
+
+    const detail = draft.requests_detail || draft.detail || {};
+    const titleRequest = detail.title_request || "";
+    const subjectRequest = detail.subject_request ?? "";
+    const priority = determinePriority(draft.category, titleRequest, subjectRequest);
+
+    const now = new Date();
+    const slaRule = await getSlaForPriority(db, priority);
+    const responseTargetMs = slaRule ? slaRule.responseTime * 60 * 1000 : null;
+    const resolutionTargetMs = slaRule ? slaRule.resolutionTime * 60 * 1000 : null;
+    const responseDueAt = responseTargetMs ? new Date(now.getTime() + responseTargetMs) : null;
+    const resolutionDueAt = resolutionTargetMs ? new Date(now.getTime() + resolutionTargetMs) : null;
+
+    const imageFile = draft.files?.image || draft.file?.image || null;
+    const fileDocument = draft.files?.file_document || draft.file?.file_document || null;
+
+    const insertResult = await requestsCollection.insertOne({
+      id_user: draft.id_user,
+      user_request: draft.user_request,
+      category: draft.category,
+      type: draft.type,
+      email_request: draft.email_request,
+      department: draft.department,
+      ticket_status: "W",
+      priority: normalizePriority(priority),
+      priority_locked_at: now,
+      start_process_ticket: now,
+      end_date_ticket: null,
+      accumulated_time_ms: 0,
+      responseDueAt,
+      resolutionDueAt,
+      response_target_ms: responseTargetMs,
+      resolution_target_ms: resolutionTargetMs,
+      respondedAt: null,
+      resolvedAt: null,
+      responseSLA: null,
+      resolutionSLA: null,
+      sla_pause: null,
+      escalated: false,
+      createdAt: now,
+      updatedAt: now,
+      requests_detail: {
+        title_request: titleRequest,
+        subject_request: subjectRequest,
+      },
+      detail: {
+        title_request: titleRequest,
+        subject_request: subjectRequest,
+      },
+      file:
+        imageFile || fileDocument
+          ? {
+              image: imageFile,
+              file_document: fileDocument,
+            }
+          : null,
+      files:
+        imageFile || fileDocument
+          ? {
+              image: imageFile,
+              file_document: fileDocument,
+            }
+          : null,
+      replies: [],
+      promoted_from_draft: true,
+    });
+
+    await draftsCollection.deleteOne({ _id: new ObjectId(id) });
+
+    const newId = insertResult.insertedId;
+    const userRequest = draft.user_request;
+
+    const mailOptions = {
+      from: userRequest,
+      to: process.env.MAIL_DESTINATION,
+      subject: `New ticket received from ${userRequest}`,
+      html: `
+    <h3>Dear IT team,</h3>
+    <p>
+      The IT Service Desk has received a new request from <b>${userRequest}</b>.
+      Please sign in to the Ticketing System to review and process this ticket.
+      Thank you.
+    </p>
+    `,
+    };
+
+    await transporter.sendMail(mailOptions, (err) => {
+      if (err) console.log(err);
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Ticket submitted to the support queue successfully.",
+      data: { id: newId.toString() },
+    });
+  } catch (err) {
+    console.error("promoteTicketDraft error:", err.message);
+    return res.status(500).json({
+      status: "failed",
+      message: "Something went wrong while submitting the ticket.",
+    });
+  }
+};
+
+const dismissTicketDraft = async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ status: "failed", message: "Invalid draft id" });
+  }
+
+  try {
+    const db = getDb();
+    const draftsCollection = db.collection("ticket_drafts");
+
+    const draft = await draftsCollection.findOne({ _id: new ObjectId(id) });
+    if (!draft) {
+      return res.status(404).json({ status: "failed", message: "Draft not found" });
+    }
+
+    if (!assertDraftOwner(draft, req.decoded)) {
+      return res.status(403).json({ status: "failed", message: "You can only dismiss your own drafts." });
+    }
+
+    await draftsCollection.deleteOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Draft removed. No ticket was created in the support queue.",
+    });
+  } catch (err) {
+    console.error("dismissTicketDraft error:", err.message);
+    return res.status(500).json({
+      status: "failed",
+      message: "Something went wrong while removing the draft.",
     });
   }
 };
@@ -2571,4 +2886,8 @@ module.exports = {
   reopenTicket,
   escalateRequest,
   reassignRequest,
+  createTicketDraft,
+  getDraftAiHelp,
+  promoteTicketDraft,
+  dismissTicketDraft,
 };
